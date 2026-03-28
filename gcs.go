@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"cloud.google.com/go/storage"
@@ -164,7 +165,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		if noRecurseSet[stepName] {
 			children, err := g.listImmediateChildren(ctx, stepsPrefix+stepName+"/")
 			if err != nil {
-				fmt.Printf("  Warning: error listing children of %s: %v\n", stepName, err)
+				slog.Warn("failed to list step children", "step", stepName, "error", err)
 				continue
 			}
 			stepDirs[stepName] = children

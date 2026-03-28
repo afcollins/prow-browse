@@ -1,3 +1,4 @@
 prow-status
+prow-status.db
 state.json
 *.txt
