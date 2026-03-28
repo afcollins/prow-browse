@@ -41,7 +41,53 @@ func getEmojiPalette(name string) []string {
 	return emojiPalettes["default"]
 }
 
-func displayGrid(results []RunResult, cfg *Config) {
+// Platform grouping: runs are classified by the platform-specific steps they contain.
+// Each platform has step prefixes that identify it, and steps from other platforms
+// are omitted from that platform's pages.
+type platformGroup struct {
+	name         string
+	stepPrefixes []string // prefixes that identify this platform's steps
+}
+
+// Order matters: more specific prefixes must come before less specific ones
+// (e.g., "rosa-hcp-" before "rosa-") so classification picks the right group.
+var platformGroups = []platformGroup{
+	{name: "AWS/IPI", stepPrefixes: []string{"ipi-", "aws-"}},
+	{name: "ROSA HCP", stepPrefixes: []string{"rosa-hcp-", "hypershift-"}},
+	{name: "ROSA", stepPrefixes: []string{"rosa-", "osd-ccs-"}},
+	{name: "vSphere", stepPrefixes: []string{"vsphere-", "upi-"}},
+}
+
+// classifyRun returns the platform name for a run based on its steps.
+func classifyRun(r RunResult) string {
+	for _, pg := range platformGroups {
+		for step := range r.Steps {
+			for _, prefix := range pg.stepPrefixes {
+				if strings.HasPrefix(step, prefix) {
+					return pg.name
+				}
+			}
+		}
+	}
+	return "other"
+}
+
+// isStepForPlatform returns true if a step belongs to the given platform or is common.
+func isStepForPlatform(step, platform string) bool {
+	for _, pg := range platformGroups {
+		if pg.name == platform {
+			continue
+		}
+		for _, prefix := range pg.stepPrefixes {
+			if strings.HasPrefix(step, prefix) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool) {
 	if len(results) == 0 {
 		return
 	}
@@ -67,104 +113,151 @@ func displayGrid(results []RunResult, cfg *Config) {
 		gatherSet[s] = true
 	}
 
-	// Collect all unique step names across all results
-	allSteps := make(map[string]bool)
-	for _, r := range results {
-		for step := range r.Steps {
-			allSteps[step] = true
-		}
-	}
-
-	// Order steps: use config step_order, then append any unknown steps alphabetically
-	stepNames := orderSteps(allSteps, cfg.StepOrder)
-
-	// Find the longest step name for padding
-	maxStepLen := 0
-	for _, s := range stepNames {
-		if len(s) > maxStepLen {
-			maxStepLen = len(s)
-		}
-	}
-
-	// Each cell is 3 terminal columns: emoji (2 wide) + 1 space
-	colWidth := 3
-
 	// Print header
 	fmt.Println()
 	fmt.Printf("%s%s%d run(s) across %d job(s)%s\n\n",
 		colorBold, colorCyan, len(results), countUniqueJobs(results), colorReset)
 
-	// Split results into pages if needed
-	pageSize := cfg.ColumnsPerPage
-	for pageStart := 0; pageStart < len(results); pageStart += pageSize {
-		pageEnd := pageStart + pageSize
-		if pageEnd > len(results) {
-			pageEnd = len(results)
+	// Group runs by platform (or treat all as one group if --group not set)
+	type indexedResult struct {
+		result RunResult
+		emoji  string
+	}
+	groups := make(map[string][]indexedResult)
+	var groupOrder []string
+	groupSeen := make(map[string]bool)
+	for i, r := range results {
+		platform := "all"
+		if groupByPlatform {
+			platform = classifyRun(r)
 		}
-		pageResults := results[pageStart:pageEnd]
-		pageEmojis := colEmojis[pageStart:pageEnd]
-
-		if len(results) > pageSize {
-			fmt.Printf("%s%sPage %d/%d (columns %d–%d of %d)%s\n\n",
-				colorBold, colorCyan,
-				pageStart/pageSize+1, (len(results)+pageSize-1)/pageSize,
-				pageStart+1, pageEnd, len(results), colorReset)
+		if !groupSeen[platform] {
+			groupSeen[platform] = true
+			groupOrder = append(groupOrder, platform)
 		}
+		groups[platform] = append(groups[platform], indexedResult{r, colEmojis[i]})
+	}
 
-		// Compute legend column widths for alignment
-		maxRunIDLen := 0
-		maxShortNameLen := 0
-		for _, r := range pageResults {
-			if len(r.RunID) > maxRunIDLen {
-				maxRunIDLen = len(r.RunID)
+	// Display each platform group
+	for _, platform := range groupOrder {
+		group := groups[platform]
+
+		// Collect steps for this group's runs
+		groupSteps := make(map[string]bool)
+		groupResults := make([]RunResult, len(group))
+		groupEmojis := make([]string, len(group))
+		for i, ir := range group {
+			groupResults[i] = ir.result
+			groupEmojis[i] = ir.emoji
+			for step := range ir.result.Steps {
+				groupSteps[step] = true
 			}
-			sn := shortJobName(r.Job, cfg)
-			if len(sn) > maxShortNameLen {
-				maxShortNameLen = len(sn)
+		}
+
+		// Filter steps: only show steps relevant to this platform when grouping
+		allStepNames := orderSteps(groupSteps, cfg.StepOrder)
+		var stepNames []string
+		for _, s := range allStepNames {
+			if !groupByPlatform || isStepForPlatform(s, platform) {
+				stepNames = append(stepNames, s)
 			}
 		}
 
-		// Print column legend: emoji  run_id  job_name  (variant)
-		fmt.Printf("%sLegend:%s\n", colorBold, colorReset)
-		for i, r := range pageResults {
-			shortName := shortJobName(r.Job, cfg)
-			fmt.Printf("  %s %-*s  %-*s", pageEmojis[i], maxRunIDLen, r.RunID, maxShortNameLen, shortName)
-			if r.VariantID != "" {
-				fmt.Printf("  %s(%s)%s", colorDim, r.VariantID, colorReset)
+		// Find the longest step name for padding
+		maxStepLen := 0
+		for _, s := range stepNames {
+			if len(s) > maxStepLen {
+				maxStepLen = len(s)
 			}
-			fmt.Println()
 		}
-		fmt.Println()
 
-		// Print column header row
-		fmt.Printf("%-*s", maxStepLen+2, "")
-		for _, e := range pageEmojis {
-			fmt.Printf("%s ", e)
-		}
-		fmt.Println()
+		// Each cell is 3 terminal columns: emoji (2 wide) + 1 space
+		colWidth := 3
 
-		// Separator line
-		fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLen+2+len(pageResults)*colWidth), colorReset)
+		// Paginate within this platform group
+		pageSize := cfg.ColumnsPerPage
+		totalPages := (len(group) + pageSize - 1) / pageSize
+		for pageStart := 0; pageStart < len(group); pageStart += pageSize {
+			pageEnd := pageStart + pageSize
+			if pageEnd > len(group) {
+				pageEnd = len(group)
+			}
+			pageResults := groupResults[pageStart:pageEnd]
+			pageEmojis := groupEmojis[pageStart:pageEnd]
 
-		// Print each step row
-		for _, step := range stepNames {
-			fmt.Printf("%-*s", maxStepLen+2, step)
-			isGatherStep := gatherSet[step]
+			// Print platform/page header
+			showHeader := groupByPlatform || totalPages > 1
+			if showHeader {
+				label := platform
+				if !groupByPlatform {
+					label = ""
+				}
+				if totalPages > 1 {
+					page := fmt.Sprintf("page %d/%d", pageStart/pageSize+1, totalPages)
+					if label != "" {
+						label = fmt.Sprintf("%s  [%s]", label, page)
+					} else {
+						label = page
+					}
+				}
+				fmt.Printf("%s%s── %s ──%s\n\n", colorBold, colorCyan, label, colorReset)
+			}
+
+			// Compute legend column widths for alignment
+			maxRunIDLen := 0
+			maxShortNameLen := 0
 			for _, r := range pageResults {
-				if r.Steps[step] {
-					fmt.Printf("%s✅%s ", colorGreen, colorReset)
-				} else if isGatherStep {
-					fmt.Printf("%s..%s ", colorDim, colorReset)
-				} else if isStepExpectedForJob(step, results) {
-					fmt.Printf("%s❌%s ", colorRed, colorReset)
-				} else {
-					fmt.Printf("%s──%s ", colorDim, colorReset)
+				if len(r.RunID) > maxRunIDLen {
+					maxRunIDLen = len(r.RunID)
+				}
+				sn := shortJobName(r.Job, cfg)
+				if len(sn) > maxShortNameLen {
+					maxShortNameLen = len(sn)
 				}
 			}
+
+			// Print column legend: emoji  run_id  job_name  (variant)
+			fmt.Printf("%sLegend:%s\n", colorBold, colorReset)
+			for i, r := range pageResults {
+				shortName := shortJobName(r.Job, cfg)
+				fmt.Printf("  %s %-*s  %-*s", pageEmojis[i], maxRunIDLen, r.RunID, maxShortNameLen, shortName)
+				if r.VariantID != "" {
+					fmt.Printf("  %s(%s)%s", colorDim, r.VariantID, colorReset)
+				}
+				fmt.Println()
+			}
+			fmt.Println()
+
+			// Print column header row
+			fmt.Printf("%-*s", maxStepLen+2, "")
+			for _, e := range pageEmojis {
+				fmt.Printf("%s ", e)
+			}
+			fmt.Println()
+
+			// Separator line
+			fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLen+2+len(pageResults)*colWidth), colorReset)
+
+			// Print each step row
+			for _, step := range stepNames {
+				fmt.Printf("%-*s", maxStepLen+2, step)
+				isGatherStep := gatherSet[step]
+				for _, r := range pageResults {
+					if r.Steps[step] {
+						fmt.Printf("%s✅%s ", colorGreen, colorReset)
+					} else if isGatherStep {
+						fmt.Printf("%s..%s ", colorDim, colorReset)
+					} else if isStepExpectedForJob(step, groupResults) {
+						fmt.Printf("%s❌%s ", colorRed, colorReset)
+					} else {
+						fmt.Printf("%s──%s ", colorDim, colorReset)
+					}
+				}
+				fmt.Println()
+			}
+
 			fmt.Println()
 		}
-
-		fmt.Println()
 	}
 }
 

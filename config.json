@@ -27,6 +27,23 @@
         "ipi-install-hosted-loki",
         "ipi-install-install",
         "ipi-install-times-collection",
+
+        "rosa-cluster-prefix",
+        "rosa-sts-account-roles-create",
+        "rosa-cluster-provision",
+        "rosa-cluster-wait-ready-cluster",
+        "rosa-cluster-notify-error",
+        "rosa-conf-idp-htpasswd",
+        "rosa-cluster-wait-ready-operators",
+        "osd-ccs-conf-idp-htpasswd-multi-users",
+        "rosa-cluster-wait-ready-nodes",
+
+        "rosa-hcp-cluster-provision",
+        "rosa-hcp-cluster-wait-ready",
+
+        "vsphere-provision",
+        "upi-install-install",
+
         "nodes-readiness",
         "multiarch-validate-nodes",
         "openshift-tests-extension-admission-crd-install",
@@ -40,20 +57,24 @@
         "openshift-qe-udn-density-pods",
         "openshift-qe-orion-udn-density",
         "send-results-to-reportportal",
+
         "gather-extra",
         "gather-must-gather",
         "gather-audit-logs",
         "gather-aws-console",
+
         "aws-deprovision-users-and-policies",
         "aws-deprovision-verification",
         "ipi-deprovision-deprovision",
+
         "rosa-cluster-deprovision",
         "rosa-cluster-index",
-        "rosa-cluster-prefix",
-        "rosa-cluster-provision",
-        "rosa-cluster-wait-ready-cluster",
-        "rosa-sts-account-roles-create",
-        "rosa-sts-account-roles-delete"
+        "rosa-sts-account-roles-delete",
+
+        "rosa-hcp-cluster-deprovision",
+
+        "vsphere-deprovision",
+        "upi-deprovision-deprovision"
     ],
     "max_runs_per_job": 3,
     "concurrency": 20

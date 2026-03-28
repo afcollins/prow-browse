@@ -28,6 +28,7 @@ func main() {
 	limit := flag.Int("limit", 0, "Max runs per job to display (0 = use config max_runs_per_job)")
 	query := flag.String("query", "", "Run a SQL query against the local database")
 	stats := flag.Bool("stats", false, "Show database statistics")
+	group := flag.Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -74,7 +75,7 @@ func main() {
 			return
 		}
 		slog.Info("loaded runs from local database", "count", len(results))
-		displayGrid(results, cfg)
+		displayGrid(results, cfg, *group)
 		return
 	}
 
@@ -205,12 +206,15 @@ func main() {
 	}
 
 	// 5. Display grid
-	displayGrid(results, cfg)
+	displayGrid(results, cfg, *group)
 }
 
 func shortJobName(job string, cfg *Config) string {
 	prefix := cfg.JobPattern + "-"
-	return strings.TrimPrefix(job, prefix)
+	if strings.HasPrefix(job, prefix) {
+		return "..." + strings.TrimPrefix(job, prefix)
+	}
+	return job
 }
 
 func printStats(db *DB) {
