@@ -21,6 +21,17 @@ func displayGrid(results []RunResult, cfg *Config) {
 		return
 	}
 
+	// Sort results by run ID (chronological order)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].RunID < results[j].RunID
+	})
+
+	// Build set of gather/no-recurse step prefixes
+	gatherSet := make(map[string]bool)
+	for _, s := range cfg.NoRecurseSteps {
+		gatherSet[s] = true
+	}
+
 	// Collect all unique step names across all results
 	allSteps := make(map[string]bool)
 	for _, r := range results {
@@ -49,18 +60,14 @@ func displayGrid(results []RunResult, cfg *Config) {
 
 	// Print header
 	fmt.Println()
-	fmt.Printf("%s%s%d new run(s) across %d job(s)%s\n\n",
+	fmt.Printf("%s%s%d run(s) across %d job(s)%s\n\n",
 		colorBold, colorCyan, len(results), countUniqueJobs(results), colorReset)
 
 	// Print column legend
 	fmt.Printf("%sLegend:%s\n", colorBold, colorReset)
 	for i, r := range results {
 		shortName := shortJobName(r.Job, cfg)
-		shortRun := r.RunID
-		if len(shortRun) > 8 {
-			shortRun = "…" + shortRun[len(shortRun)-8:]
-		}
-		fmt.Printf("  %s[%2d]%s %s : %s", colorYellow, i+1, colorReset, shortName, shortRun)
+		fmt.Printf("  %s[%d]%s %s : %s", colorYellow, i+1, colorReset, shortName, r.RunID)
 		if r.VariantID != "" {
 			fmt.Printf(" %s(%s)%s", colorDim, r.VariantID, colorReset)
 		}
@@ -71,7 +78,7 @@ func displayGrid(results []RunResult, cfg *Config) {
 	// Print column header row (just numbers)
 	fmt.Printf("%-*s", maxStepLen+2, "")
 	for i := range results {
-		fmt.Printf(" %s[%2d]%s", colorYellow, i+1, colorReset)
+		fmt.Printf(" %s[%d]%s", colorYellow, i+1, colorReset)
 	}
 	fmt.Println()
 
@@ -81,46 +88,19 @@ func displayGrid(results []RunResult, cfg *Config) {
 	// Print each step row
 	for _, step := range stepNames {
 		fmt.Printf("%-*s", maxStepLen+2, step)
+		isGatherStep := gatherSet[step]
 		for _, r := range results {
 			if r.Steps[step] {
 				fmt.Printf(" %s ✅ %s", colorGreen, colorReset)
+			} else if isGatherStep {
+				fmt.Printf(" %s .. %s", colorDim, colorReset)
+			} else if isStepExpectedForJob(step, results) {
+				fmt.Printf(" %s ❌ %s", colorRed, colorReset)
 			} else {
-				// Check if this step appears in ANY result to distinguish
-				// "not expected" vs "missing"
-				if isStepExpectedForJob(step, results) {
-					fmt.Printf(" %s ❌ %s", colorRed, colorReset)
-				} else {
-					fmt.Printf(" %s ── %s", colorDim, colorReset)
-				}
+				fmt.Printf(" %s ── %s", colorDim, colorReset)
 			}
 		}
 		fmt.Println()
-	}
-
-	// Print no-recurse step details
-	hasNoRecurseDetails := false
-	for _, r := range results {
-		if len(r.StepDirs) > 0 {
-			hasNoRecurseDetails = true
-			break
-		}
-	}
-
-	if hasNoRecurseDetails {
-		fmt.Printf("\n%s%sNo-recurse step contents:%s\n", colorBold, colorCyan, colorReset)
-		for i, r := range results {
-			if len(r.StepDirs) == 0 {
-				continue
-			}
-			fmt.Printf("\n  %s[%2d]%s %s:%s\n", colorYellow, i+1, colorReset,
-				shortJobName(r.Job, cfg), r.RunID)
-			for step, children := range r.StepDirs {
-				fmt.Printf("    %s%s/%s\n", colorBold, step, colorReset)
-				for _, child := range children {
-					fmt.Printf("      %s\n", child)
-				}
-			}
-		}
 	}
 
 	fmt.Println()
