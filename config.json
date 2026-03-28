@@ -1,0 +1,17 @@
+{
+    "bucket": "test-platform-results",
+    "prefix": "logs",
+    "job_pattern": "periodic-ci-openshift-eng-ocp-qe-perfscale",
+    "no_recurse_steps": [
+        "gather-extra",
+        "gather-must-gather",
+        "gather-audit-logs",
+        "gather-aws-console"
+    ],
+    "ignore_artifact_dirs": [
+        "build-resources",
+        "release"
+    ],
+    "max_runs_per_job": 3,
+    "concurrency": 20
+}
