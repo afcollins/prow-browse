@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"sort"
 	"strings"
 )
@@ -10,11 +11,35 @@ const (
 	colorReset  = "\033[0m"
 	colorGreen  = "\033[32m"
 	colorRed    = "\033[31m"
-	colorYellow = "\033[33m"
 	colorCyan   = "\033[36m"
 	colorDim    = "\033[2m"
 	colorBold   = "\033[1m"
 )
+
+// Emoji palettes for column headers. Each emoji is 2 terminal columns wide.
+var emojiPalettes = map[string][]string{
+	"fruits": {
+		"🍎", "🍊", "🍋", "🍇", "🍉", "🍓", "🫐", "🍑",
+		"🍒", "🥝", "🍍", "🥭", "🍌", "🥥", "🍈", "🍐",
+	},
+	"default": {
+		"🔴", "🟠", "🟡", "🟢", "🔵", "🟣", "🟤", "⚫",
+		"🔶", "🔷", "💠", "🔮", "💎", "🪨", "⭐", "🌙",
+		"🍎", "🍊", "🍋", "🍇", "🍉", "🍓", "🫐", "🍑",
+		"🌸", "🌺", "🌻", "🌼", "🌷", "🪷", "🌹", "💐",
+		"🐶", "🐱", "🐻", "🐼", "🐨", "🦊", "🐸", "🐧",
+		"🎯", "🎲", "🎮", "🎸", "🎺", "🥁", "🎨", "🧩",
+		"⚡", "🔥", "💧", "🌊", "🧊", "🌀", "💫", "🌈",
+		"🚀", "🛸", "🚤", "🚂", "🚜", "🛩", "🚁", "🛶",
+	},
+}
+
+func getEmojiPalette(name string) []string {
+	if p, ok := emojiPalettes[name]; ok {
+		return p
+	}
+	return emojiPalettes["default"]
+}
 
 func displayGrid(results []RunResult, cfg *Config) {
 	if len(results) == 0 {
@@ -25,6 +50,16 @@ func displayGrid(results []RunResult, cfg *Config) {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].RunID < results[j].RunID
 	})
+
+	// Assign a random emoji to each column (shuffled, no repeats until palette exhausted)
+	palette := getEmojiPalette(cfg.EmojiPalette)
+	shuffled := make([]string, len(palette))
+	copy(shuffled, palette)
+	rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+	colEmojis := make([]string, len(results))
+	for i := range results {
+		colEmojis[i] = shuffled[i%len(shuffled)]
+	}
 
 	// Build set of gather/no-recurse step prefixes
 	gatherSet := make(map[string]bool)
@@ -40,12 +75,8 @@ func displayGrid(results []RunResult, cfg *Config) {
 		}
 	}
 
-	// Sort step names for consistent display
-	var stepNames []string
-	for s := range allSteps {
-		stepNames = append(stepNames, s)
-	}
-	sort.Strings(stepNames)
+	// Order steps: use config step_order, then append any unknown steps alphabetically
+	stepNames := orderSteps(allSteps, cfg.StepOrder)
 
 	// Find the longest step name for padding
 	maxStepLen := 0
@@ -55,8 +86,8 @@ func displayGrid(results []RunResult, cfg *Config) {
 		}
 	}
 
-	// Column width for each result
-	colWidth := 5 // enough for " ✅ " or " ❌ " or " ── "
+	// Each cell is 3 terminal columns: emoji (2 wide) + 1 space
+	colWidth := 3
 
 	// Print header
 	fmt.Println()
@@ -67,7 +98,7 @@ func displayGrid(results []RunResult, cfg *Config) {
 	fmt.Printf("%sLegend:%s\n", colorBold, colorReset)
 	for i, r := range results {
 		shortName := shortJobName(r.Job, cfg)
-		fmt.Printf("  %s[%d]%s %s : %s", colorYellow, i+1, colorReset, shortName, r.RunID)
+		fmt.Printf("  %s %s : %s", colEmojis[i], shortName, r.RunID)
 		if r.VariantID != "" {
 			fmt.Printf(" %s(%s)%s", colorDim, r.VariantID, colorReset)
 		}
@@ -75,10 +106,10 @@ func displayGrid(results []RunResult, cfg *Config) {
 	}
 	fmt.Println()
 
-	// Print column header row (just numbers)
+	// Print column header row — each emoji is 2 wide + 1 space = 3 cols, matching cell width
 	fmt.Printf("%-*s", maxStepLen+2, "")
-	for i := range results {
-		fmt.Printf(" %s[%d]%s", colorYellow, i+1, colorReset)
+	for _, e := range colEmojis {
+		fmt.Printf("%s ", e)
 	}
 	fmt.Println()
 
@@ -91,19 +122,46 @@ func displayGrid(results []RunResult, cfg *Config) {
 		isGatherStep := gatherSet[step]
 		for _, r := range results {
 			if r.Steps[step] {
-				fmt.Printf(" %s ✅ %s", colorGreen, colorReset)
+				fmt.Printf("%s✅%s ", colorGreen, colorReset)
 			} else if isGatherStep {
-				fmt.Printf(" %s .. %s", colorDim, colorReset)
+				fmt.Printf("%s..%s ", colorDim, colorReset)
 			} else if isStepExpectedForJob(step, results) {
-				fmt.Printf(" %s ❌ %s", colorRed, colorReset)
+				fmt.Printf("%s❌%s ", colorRed, colorReset)
 			} else {
-				fmt.Printf(" %s ── %s", colorDim, colorReset)
+				fmt.Printf("%s──%s ", colorDim, colorReset)
 			}
 		}
 		fmt.Println()
 	}
 
 	fmt.Println()
+}
+
+// orderSteps returns step names ordered by config step_order.
+// Steps not in the config order are appended alphabetically at the end.
+func orderSteps(allSteps map[string]bool, configOrder []string) []string {
+	var ordered []string
+	seen := make(map[string]bool)
+
+	// First add steps in config order (only if they exist in results)
+	for _, s := range configOrder {
+		if allSteps[s] {
+			ordered = append(ordered, s)
+			seen[s] = true
+		}
+	}
+
+	// Then add any remaining steps alphabetically
+	var remaining []string
+	for s := range allSteps {
+		if !seen[s] {
+			remaining = append(remaining, s)
+		}
+	}
+	sort.Strings(remaining)
+	ordered = append(ordered, remaining...)
+
+	return ordered
 }
 
 // isStepExpectedForJob checks if a step appears in at least some percentage of results,

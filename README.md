@@ -5,8 +5,11 @@ A CLI tool that provides a single-pane view of OpenShift CI (Prow) periodic job 
 ## Features
 
 - Lists periodic perfscale jobs from a GCS bucket
-- Tracks seen runs in a local state file, only showing new runs by default
-- Displays a grid of step directories (rows) vs job:run (columns) with green/red status
+- Stores all fetched data in a local SQLite database for offline slicing
+- Displays a grid of step directories (rows) vs job:run (columns) with emoji status indicators
+- Steps are ordered by execution sequence (configurable via `step_order`)
+- Each column gets a unique randomly-assigned emoji for easy visual tracking
+- Gather/optional steps shown as `..` instead of failures
 - Handles "no-recurse" steps (e.g., `gather-extra`) by listing immediate children without descending
 - Uses the Go GCS SDK for efficient parallel API calls
 
@@ -16,15 +19,24 @@ A CLI tool that provides a single-pane view of OpenShift CI (Prow) periodic job 
 # Build
 go build -o prow-status .
 
-# Show only new runs since last check
+# Fetch new runs from GCS and display
 ./prow-status
 
-# Show all recent runs (ignores state)
+# Show all recent runs (re-fetch even if previously seen)
 ./prow-status --all
 
 # Filter to specific job patterns
 ./prow-status --jobs "control-plane-120nodes"
-./prow-status --all --jobs "data-path"
+
+# Display from local database only (no GCS calls)
+./prow-status --local --jobs "120nodes"
+./prow-status --local --jobs "aws-4.22" --limit 5
+
+# Show database statistics
+./prow-status --stats
+
+# Run a SQL query against the local database
+./prow-status --query "SELECT job, count(*) FROM runs GROUP BY job"
 ```
 
 ## Flags
@@ -32,9 +44,13 @@ go build -o prow-status .
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | `config.json` | Path to config file |
-| `--state` | `state.json` | Path to state file (tracks seen runs) |
+| `--db` | `prow-status.db` | SQLite database path |
 | `--all` | `false` | Show all recent runs, not just new ones |
-| `--jobs` | `""` | Additional substring filter for job names |
+| `--local` | `false` | Display from local database only, no GCS fetch |
+| `--jobs` | `""` | Filter job names by substring |
+| `--limit` | `0` | Max runs per job to display (0 = use config default) |
+| `--stats` | `false` | Show database statistics |
+| `--query` | `""` | Run a SQL query against the local database |
 
 ## Configuration
 
@@ -45,8 +61,10 @@ Edit `config.json`:
     "bucket": "test-platform-results",
     "prefix": "logs",
     "job_pattern": "periodic-ci-openshift-eng-ocp-qe-perfscale",
-    "no_recurse_steps": ["gather-extra", "gather-must-gather", "gather-audit-logs", "gather-aws-console"],
+    "no_recurse_steps": ["gather-extra", "gather-must-gather", ...],
     "ignore_artifact_dirs": ["build-resources", "release"],
+    "step_order": ["ipi-conf", "ipi-conf-telemetry", "ipi-conf-aws", ...],
+    "emoji_palette": "default",
     "max_runs_per_job": 3,
     "concurrency": 20
 }
@@ -57,16 +75,18 @@ Edit `config.json`:
 | `bucket` | GCS bucket name (without `gs://`) |
 | `prefix` | Path prefix within the bucket |
 | `job_pattern` | Prefix to match job directory names |
-| `no_recurse_steps` | Step directories to list but not recurse into |
+| `no_recurse_steps` | Step dirs to list but not recurse into (shown as `..` when absent) |
 | `ignore_artifact_dirs` | Directories under `artifacts/` to skip (not variant dirs) |
+| `step_order` | Ordered list of step names matching CI execution sequence |
+| `emoji_palette` | Emoji set for column headers: `"default"` (64 emojis) or `"fruits"` (16) |
 | `max_runs_per_job` | How many recent runs to check per job |
 | `concurrency` | Max parallel GCS API calls |
 
 ## Grid output
 
-- **Rows**: step directories found under `artifacts/{variant}/`
-- **Columns**: numbered job:run pairs (legend printed above the grid)
-- **Cells**: `✅` = step exists, `❌` = step missing (expected), `──` = not applicable for this job type
+- **Rows**: step directories ordered by CI execution sequence
+- **Columns**: emoji-labeled job:run pairs (legend printed above the grid)
+- **Cells**: `✅` = step exists, `❌` = step missing (expected), `..` = optional/gather step, `──` = not applicable for this job type
 
 ## Prerequisites
 

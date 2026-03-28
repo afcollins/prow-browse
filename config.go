@@ -11,6 +11,8 @@ type Config struct {
 	JobPattern        string   `json:"job_pattern"`
 	NoRecurseSteps    []string `json:"no_recurse_steps"`
 	IgnoreArtifactDirs []string `json:"ignore_artifact_dirs"`
+	StepOrder         []string `json:"step_order"`
+	EmojiPalette      string   `json:"emoji_palette"`
 	MaxRunsPerJob     int      `json:"max_runs_per_job"`
 	Concurrency       int      `json:"concurrency"`
 }
