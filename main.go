@@ -29,6 +29,7 @@ func main() {
 	query := flag.String("query", "", "Run a SQL query against the local database")
 	stats := flag.Bool("stats", false, "Show database statistics")
 	group := flag.Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
+	useTable := flag.Bool("table", false, "Use lipgloss table rendering instead of raw grid")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -75,7 +76,7 @@ func main() {
 			return
 		}
 		slog.Info("loaded runs from local database", "count", len(results))
-		displayGrid(results, cfg, *group)
+		displayGrid(results, cfg, *group, *useTable)
 		return
 	}
 
@@ -222,7 +223,7 @@ func main() {
 	}
 
 	// 5. Display grid
-	displayGrid(results, cfg, *group)
+	displayGrid(results, cfg, *group, *useTable)
 }
 
 func shortJobName(job string, cfg *Config) string {

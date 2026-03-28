@@ -85,7 +85,19 @@ func isStepForPlatform(step, platform string) bool {
 	return true
 }
 
-func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool) {
+// pageData holds everything needed to render one page of the grid.
+type pageData struct {
+	platform     string
+	pageNum      int
+	totalPages   int
+	results      []RunResult
+	emojis       []string
+	stepNames    []string
+	groupResults []RunResult // all results in this platform group (for expected-step heuristic)
+	optionalSet  map[string]bool
+}
+
+func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTable bool) {
 	if len(results) == 0 {
 		return
 	}
@@ -177,17 +189,6 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool) {
 		}
 		stepNames = append(stepNames, gatherSteps...)
 
-		// Find the longest step name for padding
-		maxStepLen := 0
-		for _, s := range stepNames {
-			if len(s) > maxStepLen {
-				maxStepLen = len(s)
-			}
-		}
-
-		// Each cell is 3 terminal columns: emoji (2 wide) + 1 space
-		colWidth := 3
-
 		// Paginate within this platform group
 		pageSize := cfg.ColumnsPerPage
 		totalPages := (len(group) + pageSize - 1) / pageSize
@@ -196,93 +197,120 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool) {
 			if pageEnd > len(group) {
 				pageEnd = len(group)
 			}
-			pageResults := groupResults[pageStart:pageEnd]
-			pageEmojis := groupEmojis[pageStart:pageEnd]
 
-			// Print platform/page header
-			showHeader := groupByPlatform || totalPages > 1
-			if showHeader {
-				label := platform
-				if !groupByPlatform {
-					label = ""
-				}
-				if totalPages > 1 {
-					page := fmt.Sprintf("page %d/%d", pageStart/pageSize+1, totalPages)
-					if label != "" {
-						label = fmt.Sprintf("%s  [%s]", label, page)
-					} else {
-						label = page
-					}
-				}
-				fmt.Printf("%s%s── %s ──%s\n\n", colorBold, colorCyan, label, colorReset)
+			pd := pageData{
+				platform:     platform,
+				pageNum:      pageStart/pageSize + 1,
+				totalPages:   totalPages,
+				results:      groupResults[pageStart:pageEnd],
+				emojis:       groupEmojis[pageStart:pageEnd],
+				stepNames:    stepNames,
+				groupResults: groupResults,
+				optionalSet:  optionalSet,
 			}
 
-			// Compute legend column widths for alignment
-			maxRunIDLen := 0
-			maxShortNameLen := 0
-			for _, r := range pageResults {
-				if len(r.RunID) > maxRunIDLen {
-					maxRunIDLen = len(r.RunID)
-				}
-				sn := shortJobName(r.Job, cfg)
-				if len(sn) > maxShortNameLen {
-					maxShortNameLen = len(sn)
-				}
+			if useTable {
+				renderTablePage(pd, cfg, groupByPlatform)
+			} else {
+				renderRawPage(pd, cfg, groupByPlatform)
 			}
-
-			// Print column legend: emoji  run_id  job_name  (variant)
-			fmt.Printf("%sLegend:%s\n", colorBold, colorReset)
-			for i, r := range pageResults {
-				shortName := shortJobName(r.Job, cfg)
-				fmt.Printf("  %s %-*s  %-*s", pageEmojis[i], maxRunIDLen, r.RunID, maxShortNameLen, shortName)
-				if r.VariantID != "" {
-					fmt.Printf("  %s(%s)%s", colorDim, r.VariantID, colorReset)
-				}
-				fmt.Println()
-			}
-			fmt.Println()
-
-			// Print column header row
-			fmt.Printf("%-*s", maxStepLen+2, "")
-			for _, e := range pageEmojis {
-				fmt.Printf("%s ", e)
-			}
-			fmt.Println()
-
-			// Separator line
-			fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLen+2+len(pageResults)*colWidth), colorReset)
-
-			// Print each step row (skip steps with no values on this page)
-			for _, step := range stepNames {
-				hasValue := false
-				for _, r := range pageResults {
-					if r.Steps[step] {
-						hasValue = true
-						break
-					}
-				}
-				if !hasValue {
-					continue
-				}
-				fmt.Printf("%-*s", maxStepLen+2, step)
-				isOptional := optionalSet[step]
-				for _, r := range pageResults {
-					if r.Steps[step] {
-						fmt.Printf("%s✅%s ", colorGreen, colorReset)
-					} else if isOptional {
-						fmt.Printf("%s..%s ", colorDim, colorReset)
-					} else if isStepExpectedForJob(step, groupResults) {
-						fmt.Printf("%s❌%s ", colorRed, colorReset)
-					} else {
-						fmt.Printf("%s──%s ", colorDim, colorReset)
-					}
-				}
-				fmt.Println()
-			}
-
-			fmt.Println()
 		}
 	}
+}
+
+func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
+	// Find the longest step name for padding
+	maxStepLen := 0
+	for _, s := range pd.stepNames {
+		if len(s) > maxStepLen {
+			maxStepLen = len(s)
+		}
+	}
+
+	colWidth := 3
+
+	// Print platform/page header
+	showHeader := groupByPlatform || pd.totalPages > 1
+	if showHeader {
+		label := pd.platform
+		if !groupByPlatform {
+			label = ""
+		}
+		if pd.totalPages > 1 {
+			page := fmt.Sprintf("page %d/%d", pd.pageNum, pd.totalPages)
+			if label != "" {
+				label = fmt.Sprintf("%s  [%s]", label, page)
+			} else {
+				label = page
+			}
+		}
+		fmt.Printf("%s%s── %s ──%s\n\n", colorBold, colorCyan, label, colorReset)
+	}
+
+	// Compute legend column widths for alignment
+	maxRunIDLen := 0
+	maxShortNameLen := 0
+	for _, r := range pd.results {
+		if len(r.RunID) > maxRunIDLen {
+			maxRunIDLen = len(r.RunID)
+		}
+		sn := shortJobName(r.Job, cfg)
+		if len(sn) > maxShortNameLen {
+			maxShortNameLen = len(sn)
+		}
+	}
+
+	// Print column legend: emoji  run_id  job_name  (variant)
+	fmt.Printf("%sLegend:%s\n", colorBold, colorReset)
+	for i, r := range pd.results {
+		shortName := shortJobName(r.Job, cfg)
+		fmt.Printf("  %s %-*s  %-*s", pd.emojis[i], maxRunIDLen, r.RunID, maxShortNameLen, shortName)
+		if r.VariantID != "" {
+			fmt.Printf("  %s(%s)%s", colorDim, r.VariantID, colorReset)
+		}
+		fmt.Println()
+	}
+	fmt.Println()
+
+	// Print column header row
+	fmt.Printf("%-*s", maxStepLen+2, "")
+	for _, e := range pd.emojis {
+		fmt.Printf("%s ", e)
+	}
+	fmt.Println()
+
+	// Separator line
+	fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLen+2+len(pd.results)*colWidth), colorReset)
+
+	// Print each step row (skip steps with no values on this page)
+	for _, step := range pd.stepNames {
+		hasValue := false
+		for _, r := range pd.results {
+			if r.Steps[step] {
+				hasValue = true
+				break
+			}
+		}
+		if !hasValue {
+			continue
+		}
+		fmt.Printf("%-*s", maxStepLen+2, step)
+		isOptional := pd.optionalSet[step]
+		for _, r := range pd.results {
+			if r.Steps[step] {
+				fmt.Printf("%s✅%s ", colorGreen, colorReset)
+			} else if isOptional {
+				fmt.Printf("%s..%s ", colorDim, colorReset)
+			} else if isStepExpectedForJob(step, pd.groupResults) {
+				fmt.Printf("%s❌%s ", colorRed, colorReset)
+			} else {
+				fmt.Printf("%s──%s ", colorDim, colorReset)
+			}
+		}
+		fmt.Println()
+	}
+
+	fmt.Println()
 }
 
 // orderSteps returns step names ordered by config step_order.
