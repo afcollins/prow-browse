@@ -30,6 +30,8 @@
 
         "rosa-cluster-prefix",
         "rosa-sts-account-roles-create",
+        "rosa-sts-oidc-config-delete",
+        "rosa-sts-operator-roles-create",
         "rosa-cluster-provision",
         "rosa-cluster-wait-ready-cluster",
         "rosa-cluster-notify-error",
@@ -41,6 +43,13 @@
         "rosa-hcp-cluster-provision",
         "rosa-hcp-cluster-wait-ready",
 
+        "ipi-conf-vsphere",
+        "ipi-conf-vsphere-check",
+        "ipi-conf-vsphere-check-vcm",
+        "ipi-conf-vsphere-dns",
+        "ipi-conf-vsphere-vcm",
+        "ipi-conf-vsphere-vips",
+        "ipi-conf-vsphere-vips-vcm",
         "vsphere-provision",
         "upi-install-install",
 
@@ -70,9 +79,14 @@
         "rosa-cluster-deprovision",
         "rosa-cluster-index",
         "rosa-sts-account-roles-delete",
+        "rosa-sts-operator-roles-delete",
 
         "rosa-hcp-cluster-deprovision",
 
+        "ipi-deprovision-vsphere-diags",
+        "ipi-deprovision-vsphere-dns",
+        "ipi-deprovision-vsphere-lb",
+        "ipi-deprovision-vsphere-lease",
         "vsphere-deprovision",
         "upi-deprovision-deprovision"
     ],

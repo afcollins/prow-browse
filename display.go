@@ -41,49 +41,47 @@ func getEmojiPalette(name string) []string {
 	return emojiPalettes["default"]
 }
 
-// Platform grouping: runs are classified by the platform-specific steps they contain.
-// Each platform has step prefixes that identify it, and steps from other platforms
-// are omitted from that platform's pages.
+// Platform grouping: runs are classified by job name keywords, and steps are
+// filtered by keywords anywhere in the step name (not just prefix).
 type platformGroup struct {
-	name         string
-	stepPrefixes []string // prefixes that identify this platform's steps
+	name        string
+	jobKeywords []string // keywords to match in job name (order matters: more specific first)
+	stepKeywords []string // keywords that mark a step as belonging to this platform
 }
 
-// Order matters: more specific prefixes must come before less specific ones
-// (e.g., "rosa-hcp-" before "rosa-") so classification picks the right group.
+// Order matters: more specific keywords must come before less specific ones
+// (e.g., "rosa-hcp" before "rosa") so classification picks the right group.
 var platformGroups = []platformGroup{
-	{name: "AWS/IPI", stepPrefixes: []string{"ipi-", "aws-"}},
-	{name: "ROSA HCP", stepPrefixes: []string{"rosa-hcp-", "hypershift-"}},
-	{name: "ROSA", stepPrefixes: []string{"rosa-", "osd-ccs-"}},
-	{name: "vSphere", stepPrefixes: []string{"vsphere-", "upi-"}},
+	{name: "ROSA HCP", jobKeywords: []string{"rosa-hcp", "hypershift"}, stepKeywords: []string{"rosa-hcp", "hypershift"}},
+	{name: "ROSA", jobKeywords: []string{"rosa"}, stepKeywords: []string{"rosa", "osd-ccs"}},
+	{name: "vSphere", jobKeywords: []string{"vsphere"}, stepKeywords: []string{"vsphere", "upi-"}},
+	{name: "AWS", jobKeywords: []string{"aws"}, stepKeywords: []string{"aws-", "ipi-"}},
 }
 
-// classifyRun returns the platform name for a run based on its steps.
+// classifyRun returns the platform name for a run based on its job name.
 func classifyRun(r RunResult) string {
 	for _, pg := range platformGroups {
-		for step := range r.Steps {
-			for _, prefix := range pg.stepPrefixes {
-				if strings.HasPrefix(step, prefix) {
-					return pg.name
-				}
+		for _, kw := range pg.jobKeywords {
+			if strings.Contains(r.Job, kw) {
+				return pg.name
 			}
 		}
 	}
 	return "other"
 }
 
-// isStepForPlatform returns true if a step belongs to the given platform or is common.
+// isStepForPlatform returns true if a step belongs to the given platform or is common (no platform keywords).
 func isStepForPlatform(step, platform string) bool {
+	// Check if the step contains any platform-specific keyword
 	for _, pg := range platformGroups {
-		if pg.name == platform {
-			continue
-		}
-		for _, prefix := range pg.stepPrefixes {
-			if strings.HasPrefix(step, prefix) {
-				return false
+		for _, kw := range pg.stepKeywords {
+			if strings.Contains(step, kw) {
+				// Step is platform-specific — only show it on that platform's page
+				return pg.name == platform
 			}
 		}
 	}
+	// No platform keyword found — it's a common step, show on all pages
 	return true
 }
 
@@ -155,13 +153,20 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool) {
 		}
 
 		// Filter steps: only show steps relevant to this platform when grouping
+		// Gather steps are pushed to the bottom of each page.
 		allStepNames := orderSteps(groupSteps, cfg.StepOrder)
 		var stepNames []string
+		var gatherSteps []string
 		for _, s := range allStepNames {
 			if !groupByPlatform || isStepForPlatform(s, platform) {
-				stepNames = append(stepNames, s)
+				if gatherSet[s] {
+					gatherSteps = append(gatherSteps, s)
+				} else {
+					stepNames = append(stepNames, s)
+				}
 			}
 		}
+		stepNames = append(stepNames, gatherSteps...)
 
 		// Find the longest step name for padding
 		maxStepLen := 0
