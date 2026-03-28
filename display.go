@@ -94,47 +94,78 @@ func displayGrid(results []RunResult, cfg *Config) {
 	fmt.Printf("%s%s%d run(s) across %d job(s)%s\n\n",
 		colorBold, colorCyan, len(results), countUniqueJobs(results), colorReset)
 
-	// Print column legend
-	fmt.Printf("%sLegend:%s\n", colorBold, colorReset)
-	for i, r := range results {
-		shortName := shortJobName(r.Job, cfg)
-		fmt.Printf("  %s %s : %s", colEmojis[i], shortName, r.RunID)
-		if r.VariantID != "" {
-			fmt.Printf(" %s(%s)%s", colorDim, r.VariantID, colorReset)
+	// Split results into pages if needed
+	pageSize := cfg.ColumnsPerPage
+	for pageStart := 0; pageStart < len(results); pageStart += pageSize {
+		pageEnd := pageStart + pageSize
+		if pageEnd > len(results) {
+			pageEnd = len(results)
 		}
-		fmt.Println()
-	}
-	fmt.Println()
+		pageResults := results[pageStart:pageEnd]
+		pageEmojis := colEmojis[pageStart:pageEnd]
 
-	// Print column header row — each emoji is 2 wide + 1 space = 3 cols, matching cell width
-	fmt.Printf("%-*s", maxStepLen+2, "")
-	for _, e := range colEmojis {
-		fmt.Printf("%s ", e)
-	}
-	fmt.Println()
+		if len(results) > pageSize {
+			fmt.Printf("%s%sPage %d/%d (columns %d–%d of %d)%s\n\n",
+				colorBold, colorCyan,
+				pageStart/pageSize+1, (len(results)+pageSize-1)/pageSize,
+				pageStart+1, pageEnd, len(results), colorReset)
+		}
 
-	// Separator line
-	fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLen+2+len(results)*colWidth), colorReset)
-
-	// Print each step row
-	for _, step := range stepNames {
-		fmt.Printf("%-*s", maxStepLen+2, step)
-		isGatherStep := gatherSet[step]
-		for _, r := range results {
-			if r.Steps[step] {
-				fmt.Printf("%s✅%s ", colorGreen, colorReset)
-			} else if isGatherStep {
-				fmt.Printf("%s..%s ", colorDim, colorReset)
-			} else if isStepExpectedForJob(step, results) {
-				fmt.Printf("%s❌%s ", colorRed, colorReset)
-			} else {
-				fmt.Printf("%s──%s ", colorDim, colorReset)
+		// Compute legend column widths for alignment
+		maxRunIDLen := 0
+		maxShortNameLen := 0
+		for _, r := range pageResults {
+			if len(r.RunID) > maxRunIDLen {
+				maxRunIDLen = len(r.RunID)
+			}
+			sn := shortJobName(r.Job, cfg)
+			if len(sn) > maxShortNameLen {
+				maxShortNameLen = len(sn)
 			}
 		}
+
+		// Print column legend: emoji  run_id  job_name  (variant)
+		fmt.Printf("%sLegend:%s\n", colorBold, colorReset)
+		for i, r := range pageResults {
+			shortName := shortJobName(r.Job, cfg)
+			fmt.Printf("  %s %-*s  %-*s", pageEmojis[i], maxRunIDLen, r.RunID, maxShortNameLen, shortName)
+			if r.VariantID != "" {
+				fmt.Printf("  %s(%s)%s", colorDim, r.VariantID, colorReset)
+			}
+			fmt.Println()
+		}
+		fmt.Println()
+
+		// Print column header row
+		fmt.Printf("%-*s", maxStepLen+2, "")
+		for _, e := range pageEmojis {
+			fmt.Printf("%s ", e)
+		}
+		fmt.Println()
+
+		// Separator line
+		fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLen+2+len(pageResults)*colWidth), colorReset)
+
+		// Print each step row
+		for _, step := range stepNames {
+			fmt.Printf("%-*s", maxStepLen+2, step)
+			isGatherStep := gatherSet[step]
+			for _, r := range pageResults {
+				if r.Steps[step] {
+					fmt.Printf("%s✅%s ", colorGreen, colorReset)
+				} else if isGatherStep {
+					fmt.Printf("%s..%s ", colorDim, colorReset)
+				} else if isStepExpectedForJob(step, results) {
+					fmt.Printf("%s❌%s ", colorRed, colorReset)
+				} else {
+					fmt.Printf("%s──%s ", colorDim, colorReset)
+				}
+			}
+			fmt.Println()
+		}
+
 		fmt.Println()
 	}
-
-	fmt.Println()
 }
 
 // orderSteps returns step names ordered by config step_order.

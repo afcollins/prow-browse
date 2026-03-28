@@ -15,6 +15,7 @@ type Config struct {
 	EmojiPalette      string   `json:"emoji_palette"`
 	MaxRunsPerJob     int      `json:"max_runs_per_job"`
 	Concurrency       int      `json:"concurrency"`
+	ColumnsPerPage    int      `json:"columns_per_page"`
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -34,6 +35,9 @@ func loadConfig(path string) (*Config, error) {
 	}
 	if cfg.Concurrency == 0 {
 		cfg.Concurrency = 20
+	}
+	if cfg.ColumnsPerPage == 0 {
+		cfg.ColumnsPerPage = 50
 	}
 
 	return &cfg, nil
