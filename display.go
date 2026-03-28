@@ -105,7 +105,16 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool) {
 		colEmojis[i] = shuffled[i%len(shuffled)]
 	}
 
-	// Build set of gather/no-recurse step prefixes
+	// Build set of optional/gather steps (shown as ".." when absent)
+	optionalSet := make(map[string]bool)
+	for _, s := range cfg.NoRecurseSteps {
+		optionalSet[s] = true
+	}
+	for _, s := range cfg.OptionalSteps {
+		optionalSet[s] = true
+	}
+
+	// Gather steps are a subset of optional — used to push them to bottom of page
 	gatherSet := make(map[string]bool)
 	for _, s := range cfg.NoRecurseSteps {
 		gatherSet[s] = true
@@ -256,11 +265,11 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool) {
 					continue
 				}
 				fmt.Printf("%-*s", maxStepLen+2, step)
-				isGatherStep := gatherSet[step]
+				isOptional := optionalSet[step]
 				for _, r := range pageResults {
 					if r.Steps[step] {
 						fmt.Printf("%s✅%s ", colorGreen, colorReset)
-					} else if isGatherStep {
+					} else if isOptional {
 						fmt.Printf("%s..%s ", colorDim, colorReset)
 					} else if isStepExpectedForJob(step, groupResults) {
 						fmt.Printf("%s❌%s ", colorRed, colorReset)

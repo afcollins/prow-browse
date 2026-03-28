@@ -9,11 +9,17 @@
         "gather-audit-logs",
         "gather-aws-console"
     ],
+    "optional_steps": [
+        "ovn-conf",
+        "ovn-conf-ipsec-manifest"
+    ],
     "ignore_artifact_dirs": [
         "build-resources",
         "release"
     ],
     "step_order": [
+        "ovn-conf",
+        "ovn-conf-ipsec-manifest",
         "ipi-conf",
         "ipi-conf-telemetry",
         "ipi-conf-aws",

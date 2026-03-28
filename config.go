@@ -10,6 +10,7 @@ type Config struct {
 	Prefix            string   `json:"prefix"`
 	JobPattern        string   `json:"job_pattern"`
 	NoRecurseSteps    []string `json:"no_recurse_steps"`
+	OptionalSteps     []string `json:"optional_steps"`
 	IgnoreArtifactDirs []string `json:"ignore_artifact_dirs"`
 	StepOrder         []string `json:"step_order"`
 	EmojiPalette      string   `json:"emoji_palette"`
