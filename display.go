@@ -243,8 +243,18 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool) {
 			// Separator line
 			fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLen+2+len(pageResults)*colWidth), colorReset)
 
-			// Print each step row
+			// Print each step row (skip steps with no values on this page)
 			for _, step := range stepNames {
+				hasValue := false
+				for _, r := range pageResults {
+					if r.Steps[step] {
+						hasValue = true
+						break
+					}
+				}
+				if !hasValue {
+					continue
+				}
 				fmt.Printf("%-*s", maxStepLen+2, step)
 				isGatherStep := gatherSet[step]
 				for _, r := range pageResults {

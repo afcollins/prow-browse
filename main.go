@@ -119,6 +119,11 @@ func main() {
 	sem := make(chan struct{}, cfg.Concurrency)
 	var wg sync.WaitGroup
 
+	slog.Info("listing runs for each job", "concurrency", cfg.Concurrency)
+	var completedJobs int64
+	var totalNewRuns int64
+	var totalSeenRuns int64
+
 	for _, job := range jobs {
 		wg.Add(1)
 		go func(j string) {
@@ -131,6 +136,8 @@ func main() {
 				slog.Warn("failed to list runs", "job", shortJobName(j, cfg), "error", err)
 				return
 			}
+
+			slog.Debug("listed runs", "job", shortJobName(j, cfg), "runs", len(runs))
 
 			// Sort runs descending (newest first) and limit
 			sort.Sort(sort.Reverse(sort.StringSlice(runs)))
@@ -149,12 +156,21 @@ func main() {
 			for _, r := range runs {
 				if *showAll || !seenSet[r] {
 					newRuns = append(newRuns, jobRun{j, r})
+					totalNewRuns++
+				} else {
+					totalSeenRuns++
 				}
+			}
+			completedJobs++
+			if completedJobs%50 == 0 {
+				slog.Info("listing runs progress", "completed", completedJobs, "total", len(jobs), "new", totalNewRuns, "seen", totalSeenRuns)
 			}
 			mu.Unlock()
 		}(job)
 	}
 	wg.Wait()
+
+	slog.Info("finished listing runs", "jobs", completedJobs, "new_runs", totalNewRuns, "seen_runs", totalSeenRuns)
 
 	if len(newRuns) == 0 {
 		slog.Info("no new runs found, use --local to view cached data or --all to re-fetch")
