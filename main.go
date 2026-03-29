@@ -82,16 +82,18 @@ func main() {
 			jobFilter, _ := cmd.Flags().GetString("jobs")
 			showAll, _ := cmd.Flags().GetBool("all")
 			numRuns, _ := cmd.Flags().GetInt("n")
+			depth, _ := cmd.Flags().GetInt("depth")
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
 
-			runFetch(db, cfg, jobFilter, showAll, numRuns, group, useTable)
+			runFetch(db, cfg, jobFilter, showAll, numRuns, depth, group, useTable)
 			return nil
 		},
 	}
 	fetchCmd.Flags().String("jobs", "", "Filter job names by substring")
 	fetchCmd.Flags().Bool("all", false, "Re-fetch runs already in the database")
 	fetchCmd.Flags().IntP("n", "n", 0, "Max total runs to fetch, most recent first (0 = all)")
+	fetchCmd.Flags().Int("depth", 5, "Runs per job to look back in GCS")
 	fetchCmd.Flags().Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
 	fetchCmd.Flags().Bool("table", false, "Use lipgloss table rendering")
 
@@ -158,7 +160,7 @@ func runLocal(db *DB, cfg *Config, jobFilter string, limit int, numRuns int, gro
 	displayGrid(results, cfg, group, useTable)
 }
 
-func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, group bool, useTable bool) {
+func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, depth int, group bool, useTable bool) {
 	ctx := context.Background()
 	client, err := newGCSClient(ctx, cfg)
 	if err != nil {
@@ -215,8 +217,8 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 			logrus.WithFields(logrus.Fields{"job": shortJobName(j, cfg), "runs": len(runs)}).Debug("listed runs")
 
 			sort.Sort(sort.Reverse(sort.StringSlice(runs)))
-			if len(runs) > cfg.MaxRunsPerJob {
-				runs = runs[:cfg.MaxRunsPerJob]
+			if len(runs) > depth {
+				runs = runs[:depth]
 			}
 
 			seenSet, err := db.SeenRuns(j)
