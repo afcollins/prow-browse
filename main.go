@@ -59,6 +59,13 @@ func main() {
 	switch subcommand {
 	case "fetch":
 		runFetch(db, cfg, *jobFilter, *showAll, *numRuns, *group, *useTable)
+	case "pull":
+		suffixes := flag.Args()
+		if len(suffixes) == 0 {
+			fmt.Fprintf(os.Stderr, "usage: prow-status pull <run-id-suffix> [<run-id-suffix> ...]\n")
+			os.Exit(1)
+		}
+		runPull(db, cfg, suffixes, *group, *useTable)
 	case "":
 		// Handle --stats and --query in default mode
 		if *stats {
@@ -75,7 +82,7 @@ func main() {
 		}
 		runLocal(db, cfg, *jobFilter, displayLimit, *numRuns, *group, *useTable)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\nUsage:\n  prow-status [flags]           display from local database\n  prow-status fetch [flags]     fetch new runs from GCS\n", subcommand)
+		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\nUsage:\n  prow-status [flags]             display from local database\n  prow-status fetch [flags]       fetch new runs from GCS\n  prow-status pull <id> [<id>...] re-fetch specific runs by ID suffix\n", subcommand)
 		os.Exit(1)
 	}
 }
@@ -259,6 +266,68 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 	}
 
 	// 5. Display grid
+	displayGrid(results, cfg, group, useTable)
+}
+
+func runPull(db *DB, cfg *Config, suffixes []string, group bool, useTable bool) {
+	// Resolve each suffix to a unique (job, runID) from the local DB
+	type jobRun struct {
+		job   string
+		runID string
+	}
+	var targets []jobRun
+	for _, suffix := range suffixes {
+		job, runID, err := db.ResolveRunID(suffix)
+		if err != nil {
+			slog.Error("failed to resolve run ID", "suffix", suffix, "error", err)
+			os.Exit(1)
+		}
+		targets = append(targets, jobRun{job, runID})
+		slog.Info("resolved run", "suffix", suffix, "job", shortJobName(job, cfg), "run_id", runID)
+	}
+
+	ctx := context.Background()
+	client, err := newGCSClient(ctx, cfg)
+	if err != nil {
+		slog.Error("failed to create GCS client", "error", err)
+		os.Exit(1)
+	}
+	defer client.close()
+
+	// Re-fetch steps for each resolved run
+	results := make([]RunResult, len(targets))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, cfg.Concurrency)
+	for i, t := range targets {
+		wg.Add(1)
+		go func(idx int, nr jobRun) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			steps, stepDirs, variant, err := client.listSteps(ctx, nr.job, nr.runID)
+			if err != nil {
+				slog.Warn("failed to list steps", "job", shortJobName(nr.job, cfg), "run", nr.runID, "error", err)
+				steps = make(map[string]bool)
+				stepDirs = make(map[string][]string)
+			}
+			results[idx] = RunResult{
+				Job:       nr.job,
+				RunID:     nr.runID,
+				Steps:     steps,
+				StepDirs:  stepDirs,
+				VariantID: variant,
+			}
+		}(i, t)
+	}
+	wg.Wait()
+
+	if err := db.StoreResults(results); err != nil {
+		slog.Error("failed to store results", "error", err)
+	} else {
+		slog.Info("updated runs in local database", "count", len(results))
+	}
+
 	displayGrid(results, cfg, group, useTable)
 }
 

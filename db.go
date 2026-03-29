@@ -222,6 +222,41 @@ func (d *DB) QueryResults(jobFilter string, limit int) ([]RunResult, error) {
 	return results, nil
 }
 
+// ResolveRunID resolves a partial run ID suffix (like a git short hash) to a unique (job, runID).
+// Returns an error if the suffix matches zero or more than one run.
+func (d *DB) ResolveRunID(suffix string) (job, runID string, err error) {
+	rows, err := d.db.Query(`SELECT job, run_id FROM runs WHERE run_id LIKE '%' || ?`, suffix)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+
+	var matches []struct{ job, runID string }
+	for rows.Next() {
+		var j, r string
+		if err := rows.Scan(&j, &r); err != nil {
+			return "", "", err
+		}
+		matches = append(matches, struct{ job, runID string }{j, r})
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", err
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", "", fmt.Errorf("no run found matching suffix %q", suffix)
+	case 1:
+		return matches[0].job, matches[0].runID, nil
+	default:
+		var ids []string
+		for _, m := range matches {
+			ids = append(ids, m.runID)
+		}
+		return "", "", fmt.Errorf("suffix %q is ambiguous, matches: %s", suffix, strings.Join(ids, ", "))
+	}
+}
+
 // ListJobs returns distinct job names stored in the database, optionally filtered.
 func (d *DB) ListJobs(jobFilter string) ([]string, error) {
 	query := `SELECT DISTINCT job FROM runs`
