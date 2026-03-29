@@ -20,16 +20,25 @@ type RunResult struct {
 }
 
 func main() {
+	// Detect subcommand before flag parsing
+	args := os.Args[1:]
+	subcommand := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		subcommand = args[0]
+		os.Args = append([]string{os.Args[0]}, args[1:]...)
+	}
+
 	configPath := flag.String("config", "config.json", "Config file path")
 	dbPath := flag.String("db", "prow-status.db", "SQLite database path")
-	showAll := flag.Bool("all", false, "Show all runs, not just new ones")
 	jobFilter := flag.String("jobs", "", "Filter job names by substring")
-	local := flag.Bool("local", false, "Display from local database only, no GCS fetch")
 	limit := flag.Int("limit", 0, "Max runs per job to display (0 = use config max_runs_per_job)")
+	numRuns := flag.Int("n", 0, "Max total runs to display, most recent first (0 = show all)")
 	query := flag.String("query", "", "Run a SQL query against the local database")
 	stats := flag.Bool("stats", false, "Show database statistics")
 	group := flag.Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
 	useTable := flag.Bool("table", false, "Use lipgloss table rendering instead of raw grid")
+	// fetch-only flags
+	showAll := flag.Bool("all", false, "Re-fetch runs already in the database (fetch subcommand only)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -47,40 +56,56 @@ func main() {
 	}
 	defer db.Close()
 
-	// Handle --stats
-	if *stats {
-		printStats(db)
-		return
-	}
-
-	// Handle --query
-	if *query != "" {
-		runQuery(db, *query)
-		return
-	}
-
-	displayLimit := cfg.MaxRunsPerJob
-	if *limit > 0 {
-		displayLimit = *limit
-	}
-
-	// Handle --local: display from database only
-	if *local {
-		results, err := db.QueryResults(*jobFilter, displayLimit)
-		if err != nil {
-			slog.Error("failed to query database", "error", err)
-			os.Exit(1)
-		}
-		if len(results) == 0 {
-			slog.Info("no matching runs in local database")
+	switch subcommand {
+	case "fetch":
+		runFetch(db, cfg, *jobFilter, *showAll, *numRuns, *group, *useTable)
+	case "":
+		// Handle --stats and --query in default mode
+		if *stats {
+			printStats(db)
 			return
 		}
-		slog.Info("loaded runs from local database", "count", len(results))
-		displayGrid(results, cfg, *group, *useTable)
+		if *query != "" {
+			runQuery(db, *query)
+			return
+		}
+		displayLimit := cfg.MaxRunsPerJob
+		if *limit > 0 {
+			displayLimit = *limit
+		}
+		runLocal(db, cfg, *jobFilter, displayLimit, *numRuns, *group, *useTable)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\nUsage:\n  prow-status [flags]           display from local database\n  prow-status fetch [flags]     fetch new runs from GCS\n", subcommand)
+		os.Exit(1)
+	}
+}
+
+func runLocal(db *DB, cfg *Config, jobFilter string, limit int, numRuns int, group bool, useTable bool) {
+	results, err := db.QueryResults(jobFilter, limit)
+	if err != nil {
+		slog.Error("failed to query database", "error", err)
+		os.Exit(1)
+	}
+	if len(results) == 0 {
+		slog.Info("no matching runs in local database; run 'prow-status fetch' to populate")
 		return
 	}
 
-	// Online mode: fetch from GCS
+	if numRuns > 0 {
+		// Sort by run ID descending globally, take top N, re-sort for display
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].RunID > results[j].RunID
+		})
+		if len(results) > numRuns {
+			results = results[:numRuns]
+		}
+	}
+
+	slog.Info("loaded runs from local database", "count", len(results))
+	displayGrid(results, cfg, group, useTable)
+}
+
+func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, group bool, useTable bool) {
 	ctx := context.Background()
 	client, err := newGCSClient(ctx, cfg)
 	if err != nil {
@@ -97,10 +122,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *jobFilter != "" {
+	if jobFilter != "" {
 		var filtered []string
 		for _, j := range jobs {
-			if strings.Contains(j, *jobFilter) {
+			if strings.Contains(j, jobFilter) {
 				filtered = append(filtered, j)
 			}
 		}
@@ -155,7 +180,7 @@ func main() {
 
 			mu.Lock()
 			for _, r := range runs {
-				if *showAll || !seenSet[r] {
+				if showAll || !seenSet[r] {
 					newRuns = append(newRuns, jobRun{j, r})
 					totalNewRuns++
 				} else {
@@ -174,16 +199,27 @@ func main() {
 	slog.Info("finished listing runs", "jobs", completedJobs, "new_runs", totalNewRuns, "seen_runs", totalSeenRuns)
 
 	if len(newRuns) == 0 {
-		slog.Info("no new runs found, use --local to view cached data or --all to re-fetch")
+		slog.Info("no new runs found; run 'prow-status fetch --all' to re-fetch already-seen runs")
 		return
 	}
 
-	// Sort new runs for consistent display
+	// If -n is set, keep only the N most recent runs (by run ID) across all jobs
+	if numRuns > 0 {
+		sort.Slice(newRuns, func(i, j int) bool {
+			return newRuns[i].runID > newRuns[j].runID
+		})
+		if len(newRuns) > numRuns {
+			newRuns = newRuns[:numRuns]
+		}
+		slog.Info("limited to most recent runs", "count", len(newRuns))
+	}
+
+	// Sort for consistent display
 	sort.Slice(newRuns, func(i, j int) bool {
 		if newRuns[i].job != newRuns[j].job {
 			return newRuns[i].job < newRuns[j].job
 		}
-		return newRuns[i].runID > newRuns[j].runID // newest first within same job
+		return newRuns[i].runID > newRuns[j].runID
 	})
 
 	slog.Info("found new runs, listing steps", "count", len(newRuns))
@@ -223,7 +259,7 @@ func main() {
 	}
 
 	// 5. Display grid
-	displayGrid(results, cfg, *group, *useTable)
+	displayGrid(results, cfg, group, useTable)
 }
 
 func shortJobName(job string, cfg *Config) string {

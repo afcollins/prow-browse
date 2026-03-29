@@ -1,7 +1,7 @@
 {
     "bucket": "test-platform-results",
     "prefix": "logs",
-    "columns_per_page": 30,
+    "columns_per_page": 20,
     "job_pattern": "periodic-ci-openshift-eng-ocp-qe-perfscale",
     "no_recurse_steps": [
         "gather-extra",
