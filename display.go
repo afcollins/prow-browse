@@ -55,6 +55,7 @@ var platformGroups = []platformGroup{
 	{name: "ROSA HCP", jobKeywords: []string{"rosa-hcp", "hypershift"}, stepKeywords: []string{"rosa-hcp", "hypershift"}},
 	{name: "ROSA", jobKeywords: []string{"rosa"}, stepKeywords: []string{"rosa", "osd-ccs"}},
 	{name: "vSphere", jobKeywords: []string{"vsphere"}, stepKeywords: []string{"vsphere", "upi-"}},
+	{name: "Baremetal", jobKeywords: []string{"metal"}, stepKeywords: []string{"installer-bm"}},
 	{name: "AWS", jobKeywords: []string{"aws"}, stepKeywords: []string{"aws-", "ipi-"}},
 }
 
