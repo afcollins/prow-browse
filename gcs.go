@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/sirupsen/logrus"
 	"strings"
 
 	"cloud.google.com/go/storage"
@@ -165,7 +165,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		if noRecurseSet[stepName] {
 			children, err := g.listImmediateChildren(ctx, stepsPrefix+stepName+"/")
 			if err != nil {
-				slog.Warn("failed to list step children", "step", stepName, "error", err)
+				logrus.WithError(err).WithField("step", stepName).Warn("failed to list step children")
 				continue
 			}
 			stepDirs[stepName] = children

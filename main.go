@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 type RunResult struct {
@@ -20,86 +21,131 @@ type RunResult struct {
 }
 
 func main() {
-	// Detect subcommand before flag parsing
-	args := os.Args[1:]
-	subcommand := ""
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		subcommand = args[0]
-		os.Args = append([]string{os.Args[0]}, args[1:]...)
+	logrus.SetOutput(os.Stderr)
+	logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+
+	var configPath, dbPath string
+
+	rootCmd := &cobra.Command{
+		Use:   "prow-status",
+		Short: "Display Prow CI job status grid from local database",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, db, err := openConfigAndDB(configPath, dbPath)
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+
+			if statsFlag, _ := cmd.Flags().GetBool("stats"); statsFlag {
+				printStats(db)
+				return nil
+			}
+			if q, _ := cmd.Flags().GetString("query"); q != "" {
+				runQuery(db, q)
+				return nil
+			}
+
+			jobFilter, _ := cmd.Flags().GetString("jobs")
+			limit, _ := cmd.Flags().GetInt("limit")
+			numRuns, _ := cmd.Flags().GetInt("n")
+			group, _ := cmd.Flags().GetBool("group")
+			useTable, _ := cmd.Flags().GetBool("table")
+
+			displayLimit := cfg.MaxRunsPerJob
+			if limit > 0 {
+				displayLimit = limit
+			}
+			runLocal(db, cfg, jobFilter, displayLimit, numRuns, group, useTable)
+			return nil
+		},
 	}
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.json", "Config file path")
+	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "prow-status.db", "SQLite database path")
+	rootCmd.Flags().String("jobs", "", "Filter job names by substring")
+	rootCmd.Flags().Int("limit", 0, "Max runs per job (0 = config default)")
+	rootCmd.Flags().IntP("n", "n", 0, "Max total runs, most recent first (0 = all)")
+	rootCmd.Flags().Bool("stats", false, "Show database statistics")
+	rootCmd.Flags().String("query", "", "Run a SQL query against the local database")
+	rootCmd.Flags().Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
+	rootCmd.Flags().Bool("table", false, "Use lipgloss table rendering")
 
-	configPath := flag.String("config", "config.json", "Config file path")
-	dbPath := flag.String("db", "prow-status.db", "SQLite database path")
-	jobFilter := flag.String("jobs", "", "Filter job names by substring")
-	limit := flag.Int("limit", 0, "Max runs per job to display (0 = use config max_runs_per_job)")
-	numRuns := flag.Int("n", 0, "Max total runs to display, most recent first (0 = show all)")
-	query := flag.String("query", "", "Run a SQL query against the local database")
-	stats := flag.Bool("stats", false, "Show database statistics")
-	group := flag.Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
-	useTable := flag.Bool("table", false, "Use lipgloss table rendering instead of raw grid")
-	// fetch-only flags
-	showAll := flag.Bool("all", false, "Re-fetch runs already in the database (fetch subcommand only)")
-	flag.Parse()
+	fetchCmd := &cobra.Command{
+		Use:   "fetch",
+		Short: "Fetch new runs from GCS and store in local database",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, db, err := openConfigAndDB(configPath, dbPath)
+			if err != nil {
+				return err
+			}
+			defer db.Close()
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+			jobFilter, _ := cmd.Flags().GetString("jobs")
+			showAll, _ := cmd.Flags().GetBool("all")
+			numRuns, _ := cmd.Flags().GetInt("n")
+			group, _ := cmd.Flags().GetBool("group")
+			useTable, _ := cmd.Flags().GetBool("table")
 
-	cfg, err := loadConfig(*configPath)
+			runFetch(db, cfg, jobFilter, showAll, numRuns, group, useTable)
+			return nil
+		},
+	}
+	fetchCmd.Flags().String("jobs", "", "Filter job names by substring")
+	fetchCmd.Flags().Bool("all", false, "Re-fetch runs already in the database")
+	fetchCmd.Flags().IntP("n", "n", 0, "Max total runs to fetch, most recent first (0 = all)")
+	fetchCmd.Flags().Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
+	fetchCmd.Flags().Bool("table", false, "Use lipgloss table rendering")
+
+	pullCmd := &cobra.Command{
+		Use:   "pull <run-id-suffix> [<run-id-suffix> ...]",
+		Short: "Re-fetch specific runs by ID suffix (matched right-to-left, like git short hashes)",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, db, err := openConfigAndDB(configPath, dbPath)
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+
+			group, _ := cmd.Flags().GetBool("group")
+			useTable, _ := cmd.Flags().GetBool("table")
+
+			runPull(db, cfg, args, group, useTable)
+			return nil
+		},
+	}
+	pullCmd.Flags().Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
+	pullCmd.Flags().Bool("table", false, "Use lipgloss table rendering")
+
+	rootCmd.AddCommand(fetchCmd, pullCmd)
+
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func openConfigAndDB(configPath, dbPath string) (*Config, *DB, error) {
+	cfg, err := loadConfig(configPath)
 	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
-
-	db, err := openDB(*dbPath)
+	db, err := openDB(dbPath)
 	if err != nil {
-		slog.Error("failed to open database", "error", err)
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	defer db.Close()
-
-	switch subcommand {
-	case "fetch":
-		runFetch(db, cfg, *jobFilter, *showAll, *numRuns, *group, *useTable)
-	case "pull":
-		suffixes := flag.Args()
-		if len(suffixes) == 0 {
-			fmt.Fprintf(os.Stderr, "usage: prow-status pull <run-id-suffix> [<run-id-suffix> ...]\n")
-			os.Exit(1)
-		}
-		runPull(db, cfg, suffixes, *group, *useTable)
-	case "":
-		// Handle --stats and --query in default mode
-		if *stats {
-			printStats(db)
-			return
-		}
-		if *query != "" {
-			runQuery(db, *query)
-			return
-		}
-		displayLimit := cfg.MaxRunsPerJob
-		if *limit > 0 {
-			displayLimit = *limit
-		}
-		runLocal(db, cfg, *jobFilter, displayLimit, *numRuns, *group, *useTable)
-	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\nUsage:\n  prow-status [flags]             display from local database\n  prow-status fetch [flags]       fetch new runs from GCS\n  prow-status pull <id> [<id>...] re-fetch specific runs by ID suffix\n", subcommand)
-		os.Exit(1)
-	}
+	return cfg, db, nil
 }
 
 func runLocal(db *DB, cfg *Config, jobFilter string, limit int, numRuns int, group bool, useTable bool) {
 	results, err := db.QueryResults(jobFilter, limit)
 	if err != nil {
-		slog.Error("failed to query database", "error", err)
-		os.Exit(1)
+		logrus.WithError(err).Fatal("failed to query database")
 	}
 	if len(results) == 0 {
-		slog.Info("no matching runs in local database; run 'prow-status fetch' to populate")
+		logrus.Info("no matching runs in local database; run 'prow-status fetch' to populate")
 		return
 	}
 
 	if numRuns > 0 {
-		// Sort by run ID descending globally, take top N, re-sort for display
 		sort.Slice(results, func(i, j int) bool {
 			return results[i].RunID > results[j].RunID
 		})
@@ -108,7 +154,7 @@ func runLocal(db *DB, cfg *Config, jobFilter string, limit int, numRuns int, gro
 		}
 	}
 
-	slog.Info("loaded runs from local database", "count", len(results))
+	logrus.WithField("count", len(results)).Info("loaded runs from local database")
 	displayGrid(results, cfg, group, useTable)
 }
 
@@ -116,17 +162,14 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 	ctx := context.Background()
 	client, err := newGCSClient(ctx, cfg)
 	if err != nil {
-		slog.Error("failed to create GCS client", "error", err)
-		os.Exit(1)
+		logrus.WithError(err).Fatal("failed to create GCS client")
 	}
 	defer client.close()
 
-	// 1. List jobs
-	slog.Info("listing jobs", "pattern", cfg.JobPattern)
+	logrus.WithField("pattern", cfg.JobPattern).Info("listing jobs")
 	jobs, err := client.listJobs(ctx)
 	if err != nil {
-		slog.Error("failed to list jobs", "error", err)
-		os.Exit(1)
+		logrus.WithError(err).Fatal("failed to list jobs")
 	}
 
 	if jobFilter != "" {
@@ -139,9 +182,8 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 		jobs = filtered
 	}
 
-	slog.Info("found jobs", "count", len(jobs))
+	logrus.WithField("count", len(jobs)).Info("found jobs")
 
-	// 2. For each job, list runs and find new ones
 	type jobRun struct {
 		job   string
 		runID string
@@ -152,7 +194,7 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 	sem := make(chan struct{}, cfg.Concurrency)
 	var wg sync.WaitGroup
 
-	slog.Info("listing runs for each job", "concurrency", cfg.Concurrency)
+	logrus.WithField("concurrency", cfg.Concurrency).Info("listing runs for each job")
 	var completedJobs int64
 	var totalNewRuns int64
 	var totalSeenRuns int64
@@ -166,22 +208,20 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 
 			runs, err := client.listRuns(ctx, j)
 			if err != nil {
-				slog.Warn("failed to list runs", "job", shortJobName(j, cfg), "error", err)
+				logrus.WithError(err).WithField("job", shortJobName(j, cfg)).Warn("failed to list runs")
 				return
 			}
 
-			slog.Debug("listed runs", "job", shortJobName(j, cfg), "runs", len(runs))
+			logrus.WithFields(logrus.Fields{"job": shortJobName(j, cfg), "runs": len(runs)}).Debug("listed runs")
 
-			// Sort runs descending (newest first) and limit
 			sort.Sort(sort.Reverse(sort.StringSlice(runs)))
 			if len(runs) > cfg.MaxRunsPerJob {
 				runs = runs[:cfg.MaxRunsPerJob]
 			}
 
-			// Check which runs we've already seen in the database
 			seenSet, err := db.SeenRuns(j)
 			if err != nil {
-				slog.Warn("failed to check seen runs", "job", shortJobName(j, cfg), "error", err)
+				logrus.WithError(err).WithField("job", shortJobName(j, cfg)).Warn("failed to check seen runs")
 				seenSet = make(map[string]bool)
 			}
 
@@ -196,21 +236,29 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 			}
 			completedJobs++
 			if completedJobs%50 == 0 {
-				slog.Info("listing runs progress", "completed", completedJobs, "total", len(jobs), "new", totalNewRuns, "seen", totalSeenRuns)
+				logrus.WithFields(logrus.Fields{
+					"completed": completedJobs,
+					"total":     len(jobs),
+					"new":       totalNewRuns,
+					"seen":      totalSeenRuns,
+				}).Info("listing runs progress")
 			}
 			mu.Unlock()
 		}(job)
 	}
 	wg.Wait()
 
-	slog.Info("finished listing runs", "jobs", completedJobs, "new_runs", totalNewRuns, "seen_runs", totalSeenRuns)
+	logrus.WithFields(logrus.Fields{
+		"jobs":      completedJobs,
+		"new_runs":  totalNewRuns,
+		"seen_runs": totalSeenRuns,
+	}).Info("finished listing runs")
 
 	if len(newRuns) == 0 {
-		slog.Info("no new runs found; run 'prow-status fetch --all' to re-fetch already-seen runs")
+		logrus.Info("no new runs found; run 'prow-status fetch --all' to re-fetch already-seen runs")
 		return
 	}
 
-	// If -n is set, keep only the N most recent runs (by run ID) across all jobs
 	if numRuns > 0 {
 		sort.Slice(newRuns, func(i, j int) bool {
 			return newRuns[i].runID > newRuns[j].runID
@@ -218,10 +266,9 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 		if len(newRuns) > numRuns {
 			newRuns = newRuns[:numRuns]
 		}
-		slog.Info("limited to most recent runs", "count", len(newRuns))
+		logrus.WithField("count", len(newRuns)).Info("limited to most recent runs")
 	}
 
-	// Sort for consistent display
 	sort.Slice(newRuns, func(i, j int) bool {
 		if newRuns[i].job != newRuns[j].job {
 			return newRuns[i].job < newRuns[j].job
@@ -229,9 +276,8 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 		return newRuns[i].runID > newRuns[j].runID
 	})
 
-	slog.Info("found new runs, listing steps", "count", len(newRuns))
+	logrus.WithField("count", len(newRuns)).Info("listing steps for new runs")
 
-	// 3. For each new run, list steps
 	results := make([]RunResult, len(newRuns))
 	for i := range newRuns {
 		wg.Add(1)
@@ -243,7 +289,10 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 			nr := newRuns[idx]
 			steps, stepDirs, variant, err := client.listSteps(ctx, nr.job, nr.runID)
 			if err != nil {
-				slog.Warn("failed to list steps", "job", shortJobName(nr.job, cfg), "run", nr.runID, "error", err)
+				logrus.WithError(err).WithFields(logrus.Fields{
+					"job": shortJobName(nr.job, cfg),
+					"run": nr.runID,
+				}).Warn("failed to list steps")
 				steps = make(map[string]bool)
 				stepDirs = make(map[string][]string)
 			}
@@ -258,19 +307,16 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 	}
 	wg.Wait()
 
-	// 4. Store results in database
 	if err := db.StoreResults(results); err != nil {
-		slog.Error("failed to store results", "error", err)
+		logrus.WithError(err).Error("failed to store results")
 	} else {
-		slog.Info("stored runs in local database", "count", len(results))
+		logrus.WithField("count", len(results)).Info("stored runs in local database")
 	}
 
-	// 5. Display grid
 	displayGrid(results, cfg, group, useTable)
 }
 
 func runPull(db *DB, cfg *Config, suffixes []string, group bool, useTable bool) {
-	// Resolve each suffix to a unique (job, runID) from the local DB
 	type jobRun struct {
 		job   string
 		runID string
@@ -279,22 +325,23 @@ func runPull(db *DB, cfg *Config, suffixes []string, group bool, useTable bool) 
 	for _, suffix := range suffixes {
 		job, runID, err := db.ResolveRunID(suffix)
 		if err != nil {
-			slog.Error("failed to resolve run ID", "suffix", suffix, "error", err)
-			os.Exit(1)
+			logrus.WithError(err).WithField("suffix", suffix).Fatal("failed to resolve run ID")
 		}
 		targets = append(targets, jobRun{job, runID})
-		slog.Info("resolved run", "suffix", suffix, "job", shortJobName(job, cfg), "run_id", runID)
+		logrus.WithFields(logrus.Fields{
+			"suffix": suffix,
+			"job":    shortJobName(job, cfg),
+			"run_id": runID,
+		}).Info("resolved run")
 	}
 
 	ctx := context.Background()
 	client, err := newGCSClient(ctx, cfg)
 	if err != nil {
-		slog.Error("failed to create GCS client", "error", err)
-		os.Exit(1)
+		logrus.WithError(err).Fatal("failed to create GCS client")
 	}
 	defer client.close()
 
-	// Re-fetch steps for each resolved run
 	results := make([]RunResult, len(targets))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, cfg.Concurrency)
@@ -307,7 +354,10 @@ func runPull(db *DB, cfg *Config, suffixes []string, group bool, useTable bool) 
 
 			steps, stepDirs, variant, err := client.listSteps(ctx, nr.job, nr.runID)
 			if err != nil {
-				slog.Warn("failed to list steps", "job", shortJobName(nr.job, cfg), "run", nr.runID, "error", err)
+				logrus.WithError(err).WithFields(logrus.Fields{
+					"job": shortJobName(nr.job, cfg),
+					"run": nr.runID,
+				}).Warn("failed to list steps")
 				steps = make(map[string]bool)
 				stepDirs = make(map[string][]string)
 			}
@@ -323,9 +373,9 @@ func runPull(db *DB, cfg *Config, suffixes []string, group bool, useTable bool) 
 	wg.Wait()
 
 	if err := db.StoreResults(results); err != nil {
-		slog.Error("failed to store results", "error", err)
+		logrus.WithError(err).Error("failed to store results")
 	} else {
-		slog.Info("updated runs in local database", "count", len(results))
+		logrus.WithField("count", len(results)).Info("updated runs in local database")
 	}
 
 	displayGrid(results, cfg, group, useTable)
@@ -342,33 +392,30 @@ func shortJobName(job string, cfg *Config) string {
 func printStats(db *DB) {
 	jobs, runs, steps, err := db.Stats()
 	if err != nil {
-		slog.Error("failed to get stats", "error", err)
-		os.Exit(1)
+		logrus.WithError(err).Fatal("failed to get stats")
 	}
-	slog.Info("database statistics", "jobs", jobs, "runs", runs, "steps", steps)
+	logrus.WithFields(logrus.Fields{"jobs": jobs, "runs": runs, "steps": steps}).Info("database statistics")
 
 	dbJobs, err := db.ListJobs("")
 	if err != nil {
 		return
 	}
 	for _, j := range dbJobs {
-		slog.Info("stored job", "name", j)
+		logrus.WithField("name", j).Info("stored job")
 	}
 }
 
 func runQuery(db *DB, query string) {
 	rows, cols, err := db.RunSQL(query)
 	if err != nil {
-		slog.Error("query failed", "error", err)
-		os.Exit(1)
+		logrus.WithError(err).Fatal("query failed")
 	}
 
 	if len(rows) == 0 {
-		slog.Info("query returned no results")
+		logrus.Info("query returned no results")
 		return
 	}
 
-	// Compute column widths
 	widths := make([]int, len(cols))
 	for i, c := range cols {
 		widths[i] = len(c)
@@ -381,7 +428,6 @@ func runQuery(db *DB, query string) {
 		}
 	}
 
-	// Print header
 	for i, c := range cols {
 		fmt.Printf("%-*s  ", widths[i], c)
 	}
@@ -394,7 +440,6 @@ func runQuery(db *DB, query string) {
 	}
 	fmt.Println()
 
-	// Print rows
 	for _, row := range rows {
 		for i, v := range row {
 			fmt.Printf("%-*s  ", widths[i], v)
