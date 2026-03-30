@@ -20,7 +20,7 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 	// Print platform/page header
 	showHeader := groupByPlatform || pd.totalPages > 1
 	if showHeader {
-		label := pd.platform
+		label := displayGroupName(pd.platform)
 		if !groupByPlatform {
 			label = ""
 		}

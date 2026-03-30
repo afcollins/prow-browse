@@ -41,49 +41,106 @@ func getEmojiPalette(name string) []string {
 	return emojiPalettes["default"]
 }
 
-// Platform grouping: runs are classified by job name keywords, and steps are
-// filtered by keywords anywhere in the step name (not just prefix).
-type platformGroup struct {
-	name        string
-	jobKeywords []string // keywords to match in job name (order matters: more specific first)
+// Two-level grouping: jobs are first classified by "job type" (loaded-upgrade,
+// metal, normal) then by platform (AWS, ROSA, ROSA HCP, vSphere).
+// The display group name is "JobType / Platform" for special types, or just
+// "Platform" for normal jobs.
+
+// jobTypeGroup identifies a special job type that gets its own section.
+// Checked before platform detection. showAllSteps means platform-specific
+// step filtering is skipped (loaded-upgrade jobs mix platform steps).
+type jobTypeGroup struct {
+	name         string
+	keyword      string
+	showAllSteps bool
+}
+
+var jobTypeGroups = []jobTypeGroup{
+	{name: "Loaded Upgrade", keyword: "loaded-upgrade", showAllSteps: true},
+	{name: "Metal", keyword: "metal", showAllSteps: true},
+}
+
+// platformDef identifies a platform by keywords in job name and step name.
+type platformDef struct {
+	name         string
+	jobKeywords  []string // keywords to match in job name
 	stepKeywords []string // keywords that mark a step as belonging to this platform
 }
 
-// Order matters: more specific keywords must come before less specific ones
-// (e.g., "rosa-hcp" before "rosa") so classification picks the right group.
-var platformGroups = []platformGroup{
-	{name: "ROSA HCP", jobKeywords: []string{"rosa-hcp", "hypershift"}, stepKeywords: []string{"rosa-hcp", "hypershift"}},
+// Order matters: more specific keywords first (rosa-hcp before rosa).
+var platforms = []platformDef{
+	{name: "ROSA HCP", jobKeywords: []string{"rosa_hcp", "hypershift"}, stepKeywords: []string{"rosa", "osd-ccs"}},
 	{name: "ROSA", jobKeywords: []string{"rosa"}, stepKeywords: []string{"rosa", "osd-ccs"}},
 	{name: "vSphere", jobKeywords: []string{"vsphere"}, stepKeywords: []string{"vsphere", "upi-"}},
-	{name: "Baremetal", jobKeywords: []string{"metal"}, stepKeywords: []string{"installer-bm"}},
 	{name: "AWS", jobKeywords: []string{"aws"}, stepKeywords: []string{"aws-", "ipi-"}},
 }
 
-// classifyRun returns the platform name for a run based on its job name.
+// classifyRun returns (jobType, platform) for a run.
+// jobType is empty for normal jobs. The display group name is composed from both.
 func classifyRun(r RunResult) string {
-	for _, pg := range platformGroups {
-		for _, kw := range pg.jobKeywords {
-			if strings.Contains(r.Job, kw) {
-				return pg.name
+	var jobType string
+	var showAll bool
+	for _, jt := range jobTypeGroups {
+		if strings.Contains(r.Job, jt.keyword) {
+			jobType = jt.name
+			showAll = jt.showAllSteps
+			break
+		}
+	}
+
+	platform := detectPlatform(r.Job)
+
+	if jobType == "" {
+		return platform
+	}
+
+	// Store showAllSteps flag in the group name with a marker
+	groupName := jobType + " / " + platform
+	if showAll {
+		groupName = "!" + groupName // "!" prefix = showAllSteps
+	}
+	return groupName
+}
+
+func detectPlatform(jobName string) string {
+	for _, p := range platforms {
+		for _, kw := range p.jobKeywords {
+			if strings.Contains(jobName, kw) {
+				return p.name
 			}
 		}
 	}
 	return "other"
 }
 
-// isStepForPlatform returns true if a step belongs to the given platform or is common (no platform keywords).
-func isStepForPlatform(step, platform string) bool {
-	// Check if the step contains any platform-specific keyword
-	for _, pg := range platformGroups {
-		for _, kw := range pg.stepKeywords {
+// isStepForPlatform returns true if a step belongs to the given group or is common.
+func isStepForPlatform(step, groupName string) bool {
+	// Groups with showAllSteps (marked with "!" prefix) never filter out steps
+	if strings.HasPrefix(groupName, "!") {
+		return true
+	}
+
+	// Check if the step matches any platform-specific keyword.
+	// A step is platform-specific if any keyword matches. It should be shown
+	// if any of the matching platforms is the current group.
+	isPlatformSpecific := false
+	for _, p := range platforms {
+		for _, kw := range p.stepKeywords {
 			if strings.Contains(step, kw) {
-				// Step is platform-specific — only show it on that platform's page
-				return pg.name == platform
+				isPlatformSpecific = true
+				if p.name == groupName {
+					return true
+				}
 			}
 		}
 	}
-	// No platform keyword found — it's a common step, show on all pages
-	return true
+	// Common step (no platform keyword matched) — show on all pages
+	return !isPlatformSpecific
+}
+
+// displayGroupName returns the clean name for display (strips internal markers).
+func displayGroupName(groupName string) string {
+	return strings.TrimPrefix(groupName, "!")
 }
 
 // pageData holds everything needed to render one page of the grid.
@@ -233,7 +290,7 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 	// Print platform/page header
 	showHeader := groupByPlatform || pd.totalPages > 1
 	if showHeader {
-		label := pd.platform
+		label := displayGroupName(pd.platform)
 		if !groupByPlatform {
 			label = ""
 		}
