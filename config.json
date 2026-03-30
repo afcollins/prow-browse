@@ -97,6 +97,16 @@
         "openshift-qe-node-density",
         "openshift-qe-udn-density-pods",
         "openshift-qe-orion-udn-density",
+        "openshift-qe-orion-cluster-density",
+        "openshift-qe-orion-crd-scale",
+        "openshift-qe-orion-node-density",
+        "openshift-qe-orion-node-density-cni",
+        "openshift-qe-orion-udn-l3",
+        "openshift-qe-orion-data-path",
+        "openshift-qe-orion-virt-data-path",
+        "openshift-qe-virt-udn-density",
+        "openshift-qe-orion-virt-udn-density",
+
         "send-results-to-reportportal",
 
         "aws-deprovision-users-and-policies",
@@ -116,11 +126,6 @@
         "ipi-deprovision-vsphere-lease",
         "vsphere-deprovision",
         "upi-deprovision-deprovision",
-
-        "openshift-qe-orion-data-path",
-        "openshift-qe-orion-virt-data-path",
-        "openshift-qe-virt-udn-density",
-        "openshift-qe-orion-virt-udn-density",
 
         "openshift-qe-installer-bm-must-gather",
 
