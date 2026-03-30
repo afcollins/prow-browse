@@ -48,16 +48,20 @@ func getEmojiPalette(name string) []string {
 
 // jobTypeGroup identifies a special job type that gets its own section.
 // Checked before platform detection. showAllSteps means platform-specific
-// step filtering is skipped (loaded-upgrade jobs mix platform steps).
+// step filtering is skipped (these jobs mix platform steps).
 type jobTypeGroup struct {
 	name         string
 	keyword      string
 	showAllSteps bool
+	subGroups    []string // optional: keywords to match in job name for sub-grouping
 }
 
+// Order matters: more specific keywords checked first.
 var jobTypeGroups = []jobTypeGroup{
 	{name: "Loaded Upgrade", keyword: "loaded-upgrade", showAllSteps: true},
-	{name: "Metal", keyword: "metal", showAllSteps: true},
+	{name: "Metal", keyword: "metal", showAllSteps: true, subGroups: []string{
+		"daily-virt", "weekly-telco-core-cpt", "weekly-eip", "weekly", "udn-bgp",
+	}},
 }
 
 // platformDef identifies a platform by keywords in job name and step name.
@@ -67,39 +71,71 @@ type platformDef struct {
 	stepKeywords []string // keywords that mark a step as belonging to this platform
 }
 
-// Order matters: more specific keywords first (rosa-hcp before rosa).
+// Order matters: more specific keywords first (rosa_hcp before rosa,
+// metal-rhoso and baremetal-multi before metal).
 var platforms = []platformDef{
 	{name: "ROSA HCP", jobKeywords: []string{"rosa_hcp", "hypershift"}, stepKeywords: []string{"rosa", "osd-ccs"}},
 	{name: "ROSA", jobKeywords: []string{"rosa"}, stepKeywords: []string{"rosa", "osd-ccs"}},
+	{name: "Metal RHOSO", jobKeywords: []string{"metal-rhoso"}},
+	{name: "Baremetal Multi", jobKeywords: []string{"baremetal-multi"}},
 	{name: "vSphere", jobKeywords: []string{"vsphere"}, stepKeywords: []string{"vsphere", "upi-"}},
 	{name: "AWS", jobKeywords: []string{"aws"}, stepKeywords: []string{"aws-", "ipi-"}},
 }
 
-// classifyRun returns (jobType, platform) for a run.
-// jobType is empty for normal jobs. The display group name is composed from both.
+// classifyRun returns a group name for a run.
+// For special job types: "!JobType / SubGroup" or "!JobType / Platform".
+// For normal jobs: "Platform".
 func classifyRun(r RunResult) string {
-	var jobType string
-	var showAll bool
-	for _, jt := range jobTypeGroups {
-		if strings.Contains(r.Job, jt.keyword) {
-			jobType = jt.name
-			showAll = jt.showAllSteps
-			break
+	// Check platforms that should NOT be treated as metal sub-groups
+	// (metal-rhoso, baremetal-multi are their own platforms)
+	for _, p := range platforms {
+		for _, kw := range p.jobKeywords {
+			if strings.Contains(r.Job, kw) {
+				// If this platform is also a jobType match, skip — let
+				// it be handled as its own platform, not a metal sub-group
+				isJobType := false
+				for _, jt := range jobTypeGroups {
+					if strings.Contains(kw, jt.keyword) {
+						isJobType = true
+					}
+				}
+				if !isJobType {
+					// Not a job type — check if it should be under a job type
+					break
+				}
+				// This is a more specific platform (metal-rhoso, baremetal-multi)
+				return p.name
+			}
 		}
 	}
 
-	platform := detectPlatform(r.Job)
-
-	if jobType == "" {
-		return platform
+	// Check for special job types (loaded-upgrade, metal)
+	for _, jt := range jobTypeGroups {
+		if strings.Contains(r.Job, jt.keyword) {
+			sub := detectSubGroup(r.Job, jt)
+			groupName := jt.name + " / " + sub
+			if jt.showAllSteps {
+				groupName = "!" + groupName
+			}
+			return groupName
+		}
 	}
 
-	// Store showAllSteps flag in the group name with a marker
-	groupName := jobType + " / " + platform
-	if showAll {
-		groupName = "!" + groupName // "!" prefix = showAllSteps
+	return detectPlatform(r.Job)
+}
+
+// detectSubGroup finds the sub-group for a job within a job type.
+// For loaded-upgrade: sub-group is the platform (AWS, ROSA, etc.)
+// For metal: sub-group is the trailing config keyword.
+func detectSubGroup(jobName string, jt jobTypeGroup) string {
+	// Check explicit sub-group keywords first
+	for _, sg := range jt.subGroups {
+		if strings.Contains(jobName, sg) {
+			return sg
+		}
 	}
-	return groupName
+	// Fall back to platform detection
+	return detectPlatform(jobName)
 }
 
 func detectPlatform(jobName string) string {
