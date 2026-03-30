@@ -89,7 +89,26 @@ func (d *DB) StoreResults(results []RunResult) error {
 	}
 	defer childStmt.Close()
 
+	delChildStmt, err := tx.Prepare(`DELETE FROM step_children WHERE job = ? AND run_id = ?`)
+	if err != nil {
+		return err
+	}
+	defer delChildStmt.Close()
+
+	delStepStmt, err := tx.Prepare(`DELETE FROM steps WHERE job = ? AND run_id = ?`)
+	if err != nil {
+		return err
+	}
+	defer delStepStmt.Close()
+
 	for _, r := range results {
+		// Clear old steps/children so re-fetch replaces stale data
+		if _, err := delChildStmt.Exec(r.Job, r.RunID); err != nil {
+			return fmt.Errorf("deleting old children %s/%s: %w", r.Job, r.RunID, err)
+		}
+		if _, err := delStepStmt.Exec(r.Job, r.RunID); err != nil {
+			return fmt.Errorf("deleting old steps %s/%s: %w", r.Job, r.RunID, err)
+		}
 		if _, err := runStmt.Exec(r.Job, r.RunID, r.VariantID); err != nil {
 			return fmt.Errorf("inserting run %s/%s: %w", r.Job, r.RunID, err)
 		}
