@@ -61,13 +61,13 @@ func main() {
 	}
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.json", "Config file path")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "prow-status.db", "SQLite database path")
-	rootCmd.Flags().String("jobs", "", "Filter job names by substring")
-	rootCmd.Flags().Int("limit", 0, "Max runs per job (0 = config default)")
+	rootCmd.Flags().StringP("jobs", "j",  "", "Filter job names by substring")
+	rootCmd.Flags().IntP("limit", "l",  0, "Max runs per job (0 = config default)")
 	rootCmd.Flags().IntP("n", "n", 0, "Max total runs, most recent first (0 = all)")
 	rootCmd.Flags().Bool("stats", false, "Show database statistics")
 	rootCmd.Flags().String("query", "", "Run a SQL query against the local database")
-	rootCmd.Flags().Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
-	rootCmd.Flags().Bool("table", false, "Use lipgloss table rendering")
+	rootCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
+	rootCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
 
 	fetchCmd := &cobra.Command{
 		Use:   "fetch",
@@ -90,12 +90,12 @@ func main() {
 			return nil
 		},
 	}
-	fetchCmd.Flags().String("jobs", "", "Filter job names by substring")
+	fetchCmd.Flags().StringP("jobs", "j", "", "Filter job names by substring")
 	fetchCmd.Flags().Bool("all", false, "Re-fetch runs already in the database")
-	fetchCmd.Flags().IntP("n", "n", 0, "Max total runs to fetch, most recent first (0 = all)")
-	fetchCmd.Flags().Int("depth", 5, "Runs per job to look back in GCS")
-	fetchCmd.Flags().Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
-	fetchCmd.Flags().Bool("table", false, "Use lipgloss table rendering")
+	fetchCmd.Flags().IntP("number", "n", 0, "Max total runs to fetch, most recent first (0 = all)")
+	fetchCmd.Flags().IntP("depth", "d", 5, "Runs per job to look back in GCS")
+	fetchCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
+	fetchCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
 
 	pullCmd := &cobra.Command{
 		Use:   "pull <run-id-suffix> [<run-id-suffix> ...]",
@@ -115,8 +115,8 @@ func main() {
 			return nil
 		},
 	}
-	pullCmd.Flags().Bool("group", false, "Group columns by platform (AWS, ROSA, etc.)")
-	pullCmd.Flags().Bool("table", false, "Use lipgloss table rendering")
+	pullCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
+	pullCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
 
 	rootCmd.AddCommand(fetchCmd, pullCmd)
 
