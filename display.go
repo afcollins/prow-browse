@@ -76,6 +76,7 @@ type platformDef struct {
 var platforms = []platformDef{
 	{name: "ROSA HCP", jobKeywords: []string{"rosa_hcp", "hypershift"}, stepKeywords: []string{"rosa", "osd-ccs"}},
 	{name: "ROSA", jobKeywords: []string{"rosa"}, stepKeywords: []string{"rosa", "osd-ccs"}},
+	{name: "NetObserv", jobKeywords: []string{"netobserv-perf-tests-netobserv"}},
 	{name: "Metal RHOSO", jobKeywords: []string{"metal-rhoso"}},
 	{name: "Baremetal Multi", jobKeywords: []string{"baremetal-multi"}},
 	{name: "vSphere", jobKeywords: []string{"vsphere"}, stepKeywords: []string{"vsphere", "upi-"}},
