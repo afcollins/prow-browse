@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -287,6 +288,7 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 
 	logrus.WithField("count", len(newRuns)).Info("listing steps for new runs")
 
+	var completedSteps int64
 	results := make([]RunResult, len(newRuns))
 	for i := range newRuns {
 		wg.Add(1)
@@ -311,6 +313,14 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 				Steps:     steps,
 				StepDirs:  stepDirs,
 				VariantID: variant,
+			}
+			n := atomic.AddInt64(&completedSteps, 1)
+			if n%20 == 0 || n == int64(len(newRuns)) {
+				logrus.WithFields(logrus.Fields{
+					"completed":  n,
+					"total":      len(newRuns),
+					"gcs_calls":  client.CallCount(),
+				}).Info("listing steps progress")
 			}
 		}(i)
 	}
