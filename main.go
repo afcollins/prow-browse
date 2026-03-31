@@ -25,10 +25,16 @@ func main() {
 	logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 
 	var configPath, dbPath string
+	var verbose bool
 
 	rootCmd := &cobra.Command{
 		Use:   "prow-status",
 		Short: "Display Prow CI job status grid from local database",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if verbose {
+				logrus.SetLevel(logrus.DebugLevel)
+			}
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, db, err := openConfigAndDB(configPath, dbPath)
 			if err != nil {
@@ -61,6 +67,7 @@ func main() {
 	}
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.json", "Config file path")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "prow-status.db", "SQLite database path")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
 	rootCmd.Flags().StringP("jobs", "j",  "", "Filter job names by substring")
 	rootCmd.Flags().IntP("limit", "l",  0, "Max runs per job (0 = config default)")
 	rootCmd.Flags().IntP("n", "n", 0, "Max total runs, most recent first (0 = all)")
@@ -309,6 +316,8 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 	}
 	wg.Wait()
 
+	logrus.WithField("total_gcs_calls", client.CallCount()).Info("GCS API calls complete")
+
 	if err := db.StoreResults(results); err != nil {
 		logrus.WithError(err).Error("failed to store results")
 	} else {
@@ -373,6 +382,8 @@ func runPull(db *DB, cfg *Config, suffixes []string, group bool, useTable bool) 
 		}(i, t)
 	}
 	wg.Wait()
+
+	logrus.WithField("total_gcs_calls", client.CallCount()).Info("GCS API calls complete")
 
 	if err := db.StoreResults(results); err != nil {
 		logrus.WithError(err).Error("failed to store results")

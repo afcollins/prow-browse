@@ -3,16 +3,26 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"strings"
+	"sync/atomic"
 
 	"cloud.google.com/go/storage"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/api/iterator"
 )
 
 type gcsClient struct {
-	client *storage.Client
-	cfg    *Config
+	client   *storage.Client
+	cfg      *Config
+	apiCalls int64 // atomic counter of GCS list operations
+}
+
+func (g *gcsClient) incCalls() {
+	atomic.AddInt64(&g.apiCalls, 1)
+}
+
+func (g *gcsClient) CallCount() int64 {
+	return atomic.LoadInt64(&g.apiCalls)
 }
 
 func newGCSClient(ctx context.Context, cfg *Config) (*gcsClient, error) {
@@ -37,6 +47,7 @@ func (g *gcsClient) listJobs(ctx context.Context) ([]string, error) {
 		Delimiter: "/",
 	}
 
+	g.incCalls()
 	var jobs []string
 	it := bucket.Objects(ctx, query)
 	for {
@@ -48,12 +59,12 @@ func (g *gcsClient) listJobs(ctx context.Context) ([]string, error) {
 			return nil, fmt.Errorf("listing jobs: %w", err)
 		}
 		if attrs.Prefix != "" {
-			// Extract job name from prefix like "logs/periodic-ci-.../""
 			name := strings.TrimPrefix(attrs.Prefix, g.cfg.Prefix+"/")
 			name = strings.TrimSuffix(name, "/")
 			jobs = append(jobs, name)
 		}
 	}
+	logrus.WithFields(logrus.Fields{"jobs": len(jobs), "api_calls": g.CallCount()}).Debug("listJobs complete")
 	return jobs, nil
 }
 
@@ -67,6 +78,7 @@ func (g *gcsClient) listRuns(ctx context.Context, job string) ([]string, error) 
 		Delimiter: "/",
 	}
 
+	g.incCalls()
 	var runs []string
 	it := bucket.Objects(ctx, query)
 	for {
@@ -85,6 +97,7 @@ func (g *gcsClient) listRuns(ctx context.Context, job string) ([]string, error) 
 			}
 		}
 	}
+	logrus.WithFields(logrus.Fields{"job": job, "runs": len(runs), "api_calls": g.CallCount()}).Debug("listRuns complete")
 	return runs, nil
 }
 
@@ -106,6 +119,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		ignoreSet[d] = true
 	}
 
+	g.incCalls()
 	var variantDir string
 	it := bucket.Objects(ctx, query)
 	for {
@@ -127,6 +141,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 	}
 
 	if variantDir == "" {
+		logrus.WithFields(logrus.Fields{"job": job, "run": runID, "api_calls": g.CallCount()}).Debug("listSteps: no variant found")
 		return make(map[string]bool), make(map[string][]string), "", nil
 	}
 
@@ -137,6 +152,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		Delimiter: "/",
 	}
 
+	g.incCalls()
 	steps := make(map[string]bool)
 	stepDirs := make(map[string][]string)
 	noRecurseSet := make(map[string]bool)
@@ -172,6 +188,10 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		}
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"job": job, "run": runID, "variant": variantDir,
+		"steps": len(steps), "no_recurse": len(stepDirs), "api_calls": g.CallCount(),
+	}).Debug("listSteps complete")
 	return steps, stepDirs, variantDir, nil
 }
 
@@ -183,6 +203,7 @@ func (g *gcsClient) listImmediateChildren(ctx context.Context, prefix string) ([
 		Delimiter: "/",
 	}
 
+	g.incCalls()
 	var children []string
 	it := bucket.Objects(ctx, query)
 	for {
