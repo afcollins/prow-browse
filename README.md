@@ -4,82 +4,64 @@ A CLI tool that provides a single-pane view of OpenShift CI (Prow) periodic job 
 
 ## Features
 
-- Lists periodic perfscale jobs from a GCS bucket
-- Stores all fetched data in a local SQLite database for offline slicing
-- Displays a grid of step directories (rows) vs job:run (columns) with emoji status indicators
-- Steps are ordered by execution sequence (configurable via `step_order`)
-- Each column gets a unique randomly-assigned emoji for easy visual tracking
-- Gather/optional steps shown as `..` instead of failures
-- Handles "no-recurse" steps (e.g., `gather-extra`) by listing immediate children without descending
-- Uses the Go GCS SDK for efficient parallel API calls
+- Cobra subcommands: local display (default), `fetch` (GCS), `pull` (re-fetch by run ID suffix)
+- SQLite-backed local database for offline slicing and ad-hoc SQL queries
+- Two renderers: ANSI emoji grid (default) and lipgloss table (`-t`)
+- Platform grouping (`-g`): separates AWS, ROSA, ROSA HCP, vSphere, Metal, etc.
+- Two-level grouping for loaded-upgrade and metal jobs (by platform/sub-config)
+- Steps ordered by CI execution sequence; gather steps pushed to bottom
+- Concurrent GCS API calls with progress logging and call counter (`-v`)
 
 ## Usage
 
 ```bash
 # Build
-go build -o prow-status .
+make build
 
 # Fetch new runs from GCS and display
-./prow-status
+./prow-status fetch
 
-# Show all recent runs (re-fetch even if previously seen)
-./prow-status --all
+# Fetch with filters
+./prow-status fetch -j "control-plane-120nodes" -d 10
 
-# Filter to specific job patterns
-./prow-status --jobs "control-plane-120nodes"
+# Re-fetch all (including previously seen)
+./prow-status fetch --all
 
-# Display from local database only (no GCS calls)
-./prow-status --local --jobs "120nodes"
-./prow-status --local --jobs "aws-4.22" --limit 5
+# Re-fetch a specific run by ID suffix
+./prow-status pull 2038435361289408512
 
-# Show database statistics
+# Display from local database
+./prow-status -j "aws-4.22" -l 5
+
+# Group by platform, use table rendering
+./prow-status -g -t
+
+# Show most recent N runs
+./prow-status -n 10
+
+# Database introspection
 ./prow-status --stats
-
-# Run a SQL query against the local database
 ./prow-status --query "SELECT job, count(*) FROM runs GROUP BY job"
+
+# Debug logging
+./prow-status fetch -v
 ```
-
-## Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--config` | `config.json` | Path to config file |
-| `--db` | `prow-status.db` | SQLite database path |
-| `--all` | `false` | Show all recent runs, not just new ones |
-| `--local` | `false` | Display from local database only, no GCS fetch |
-| `--jobs` | `""` | Filter job names by substring |
-| `--limit` | `0` | Max runs per job to display (0 = use config default) |
-| `--stats` | `false` | Show database statistics |
-| `--query` | `""` | Run a SQL query against the local database |
 
 ## Configuration
 
 Edit `config.json`:
 
-```json
-{
-    "bucket": "test-platform-results",
-    "prefix": "logs",
-    "job_pattern": "periodic-ci-openshift-eng-ocp-qe-perfscale",
-    "no_recurse_steps": ["gather-extra", "gather-must-gather", ...],
-    "ignore_artifact_dirs": ["build-resources", "release"],
-    "step_order": ["ipi-conf", "ipi-conf-telemetry", "ipi-conf-aws", ...],
-    "emoji_palette": "default",
-    "max_runs_per_job": 3,
-    "concurrency": 20
-}
-```
-
 | Field | Description |
 |-------|-------------|
-| `bucket` | GCS bucket name (without `gs://`) |
+| `bucket` | GCS bucket name |
 | `prefix` | Path prefix within the bucket |
 | `job_pattern` | Prefix to match job directory names |
-| `no_recurse_steps` | Step dirs to list but not recurse into (shown as `..` when absent) |
-| `ignore_artifact_dirs` | Directories under `artifacts/` to skip (not variant dirs) |
+| `no_recurse_steps` | Steps to list but not recurse into (shown as `..` when absent) |
+| `optional_steps` | Steps shown as `..` when absent (e.g., ovn-conf) |
+| `ignore_artifact_dirs` | Directories under `artifacts/` to skip during variant detection |
 | `step_order` | Ordered list of step names matching CI execution sequence |
-| `emoji_palette` | Emoji set for column headers: `"default"` (64 emojis) or `"fruits"` (16) |
-| `max_runs_per_job` | How many recent runs to check per job |
+| `columns_per_page` | Max columns before paginating (default: 50) |
+| `max_runs_per_job` | Default max runs per job for local display |
 | `concurrency` | Max parallel GCS API calls |
 
 ## Grid output
