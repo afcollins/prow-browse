@@ -79,7 +79,7 @@ func main() {
 
 	fetchCmd := &cobra.Command{
 		Use:   "fetch",
-		Short: "Fetch new runs from GCS and store in local database",
+		Short: "Discover run IDs from GCS and store in local database (no artifact traversal)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, db, err := openConfigAndDB(configPath, dbPath)
 			if err != nil {
@@ -90,25 +90,18 @@ func main() {
 			jobFilter, _ := cmd.Flags().GetString("jobs")
 			showAll, _ := cmd.Flags().GetBool("all")
 			numRuns, _ := cmd.Flags().GetInt("n")
-			depth, _ := cmd.Flags().GetInt("depth")
-			group, _ := cmd.Flags().GetBool("group")
-			useTable, _ := cmd.Flags().GetBool("table")
 
-			runFetch(db, cfg, jobFilter, showAll, numRuns, depth, group, useTable)
+			runFetch(db, cfg, jobFilter, showAll, numRuns)
 			return nil
 		},
 	}
 	fetchCmd.Flags().StringP("jobs", "j", "", "Filter job names by substring")
 	fetchCmd.Flags().Bool("all", false, "Re-fetch runs already in the database")
-	fetchCmd.Flags().IntP("number", "n", 0, "Max total runs to fetch, most recent first (0 = all)")
-	fetchCmd.Flags().IntP("depth", "d", 5, "Runs per job to look back in GCS")
-	fetchCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
-	fetchCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
+	fetchCmd.Flags().IntP("number", "n", 5, "Runs per job to look back in GCS")
 
 	pullCmd := &cobra.Command{
-		Use:   "pull <run-id-suffix> [<run-id-suffix> ...]",
-		Short: "Re-fetch specific runs by ID suffix (matched right-to-left, like git short hashes)",
-		Args:  cobra.MinimumNArgs(1),
+		Use:   "pull [run-id-suffix ...]",
+		Short: "Fetch step data for runs (latest unpulled via -n, or specific run IDs)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, db, err := openConfigAndDB(configPath, dbPath)
 			if err != nil {
@@ -116,13 +109,17 @@ func main() {
 			}
 			defer db.Close()
 
+			jobFilter, _ := cmd.Flags().GetString("jobs")
+			numRuns, _ := cmd.Flags().GetInt("n")
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
 
-			runPull(db, cfg, args, group, useTable)
+			runPull(db, cfg, args, jobFilter, numRuns, group, useTable)
 			return nil
 		},
 	}
+	pullCmd.Flags().StringP("jobs", "j", "", "Filter job names by substring")
+	pullCmd.Flags().IntP("number", "n", 0, "Max runs to pull (latest unpulled, 0 = all unpulled)")
 	pullCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
 	pullCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
 
@@ -168,7 +165,7 @@ func runLocal(db *DB, cfg *Config, jobFilter string, limit int, numRuns int, gro
 	displayGrid(results, cfg, group, useTable)
 }
 
-func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, depth int, group bool, useTable bool) {
+func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, depth int) {
 	ctx := context.Background()
 	client, err := newGCSClient(ctx, cfg)
 	if err != nil {
@@ -225,7 +222,7 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 			logrus.WithFields(logrus.Fields{"job": shortJobName(j, cfg), "runs": len(runs)}).Debug("listed runs")
 
 			sort.Sort(sort.Reverse(sort.StringSlice(runs)))
-			if len(runs) > depth {
+			if depth > 0 && len(runs) > depth {
 				runs = runs[:depth]
 			}
 
@@ -262,23 +259,15 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 		"jobs":      completedJobs,
 		"new_runs":  totalNewRuns,
 		"seen_runs": totalSeenRuns,
+		"gcs_calls": client.CallCount(),
 	}).Info("finished listing runs")
 
 	if len(newRuns) == 0 {
-		logrus.Info("no new runs found; run 'prow-status fetch --all' to re-fetch already-seen runs")
+		fmt.Println("no new runs found; use --all to re-fetch already-seen runs")
 		return
 	}
 
-	if numRuns > 0 {
-		sort.Slice(newRuns, func(i, j int) bool {
-			return newRuns[i].runID > newRuns[j].runID
-		})
-		if len(newRuns) > numRuns {
-			newRuns = newRuns[:numRuns]
-		}
-		logrus.WithField("count", len(newRuns)).Info("limited to most recent runs")
-	}
-
+	// Sort by job name, then most recent first
 	sort.Slice(newRuns, func(i, j int) bool {
 		if newRuns[i].job != newRuns[j].job {
 			return newRuns[i].job < newRuns[j].job
@@ -286,86 +275,102 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, numRuns int, 
 		return newRuns[i].runID > newRuns[j].runID
 	})
 
-	logrus.WithField("count", len(newRuns)).Info("listing steps for new runs")
-
-	var completedSteps int64
+	// Store run entries (no step data)
 	results := make([]RunResult, len(newRuns))
-	for i := range newRuns {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			nr := newRuns[idx]
-			steps, stepDirs, variant, err := client.listSteps(ctx, nr.job, nr.runID)
-			if err != nil {
-				logrus.WithError(err).WithFields(logrus.Fields{
-					"job": shortJobName(nr.job, cfg),
-					"run": nr.runID,
-				}).Warn("failed to list steps")
-				steps = make(map[string]bool)
-				stepDirs = make(map[string][]string)
-			}
-			results[idx] = RunResult{
-				Job:       nr.job,
-				RunID:     nr.runID,
-				Steps:     steps,
-				StepDirs:  stepDirs,
-				VariantID: variant,
-			}
-			n := atomic.AddInt64(&completedSteps, 1)
-			if n%20 == 0 || n == int64(len(newRuns)) {
-				logrus.WithFields(logrus.Fields{
-					"completed":  n,
-					"total":      len(newRuns),
-					"gcs_calls":  client.CallCount(),
-				}).Info("listing steps progress")
-			}
-		}(i)
+	for i, nr := range newRuns {
+		results[i] = RunResult{Job: nr.job, RunID: nr.runID}
 	}
-	wg.Wait()
-
-	logrus.WithField("total_gcs_calls", client.CallCount()).Info("GCS API calls complete")
-
-	if err := db.StoreResults(results); err != nil {
-		logrus.WithError(err).Error("failed to store results")
-	} else {
-		logrus.WithField("count", len(results)).Info("stored runs in local database")
+	if err := db.StoreRuns(results); err != nil {
+		logrus.WithError(err).Error("failed to store runs")
 	}
 
-	displayGrid(results, cfg, group, useTable)
+	// Print run list grouped by job
+	currentJob := ""
+	for _, nr := range newRuns {
+		if nr.job != currentJob {
+			currentJob = nr.job
+			fmt.Printf("\n%s\n", shortJobName(nr.job, cfg))
+		}
+		fmt.Printf("  %s\n", nr.runID)
+	}
+	fmt.Printf("\n%d new runs stored. Use 'prow-status pull -n <N>' to fetch step data.\n", len(newRuns))
 }
 
-func runPull(db *DB, cfg *Config, suffixes []string, group bool, useTable bool) {
+func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns int, group bool, useTable bool) {
 	type jobRun struct {
 		job   string
 		runID string
 	}
+
+	ctx := context.Background()
+	var client *gcsClient
+
 	var targets []jobRun
+
+	// Mode 1: explicit run IDs (always force re-traverse)
 	for _, suffix := range suffixes {
 		job, runID, err := db.ResolveRunID(suffix)
 		if err != nil {
-			logrus.WithError(err).WithField("suffix", suffix).Fatal("failed to resolve run ID")
+			// Fallback: search GCS
+			logrus.WithField("suffix", suffix).Info("not found in DB, searching GCS")
+			if client == nil {
+				var cerr error
+				client, cerr = newGCSClient(ctx, cfg)
+				if cerr != nil {
+					logrus.WithError(cerr).Fatal("failed to create GCS client")
+				}
+			}
+			job, runID, err = client.findRunByID(ctx, suffix)
+			if err != nil {
+				logrus.WithError(err).WithField("suffix", suffix).Fatal("failed to find run ID")
+			}
 		}
 		targets = append(targets, jobRun{job, runID})
 		logrus.WithFields(logrus.Fields{
 			"suffix": suffix,
 			"job":    shortJobName(job, cfg),
 			"run_id": runID,
-		}).Info("resolved run")
+		}).Info("resolved run (force re-pull)")
 	}
 
-	ctx := context.Background()
-	client, err := newGCSClient(ctx, cfg)
-	if err != nil {
-		logrus.WithError(err).Fatal("failed to create GCS client")
+	// Mode 2: latest N unpulled runs from DB
+	if numRuns > 0 || (len(suffixes) == 0) {
+		limit := numRuns
+		if limit == 0 {
+			limit = cfg.MaxRunsPerJob
+		}
+		unpulled, err := db.QueryRunsWithoutSteps(jobFilter, limit)
+		if err != nil {
+			logrus.WithError(err).Fatal("failed to query unpulled runs")
+		}
+		for _, r := range unpulled {
+			targets = append(targets, jobRun{r.Job, r.RunID})
+		}
+		if len(unpulled) > 0 {
+			logrus.WithField("count", len(unpulled)).Info("found unpulled runs in DB")
+		}
+	}
+
+	if len(targets) == 0 {
+		fmt.Println("no runs to pull; use 'prow-status fetch' to discover new runs")
+		return
+	}
+
+	if client == nil {
+		var err error
+		client, err = newGCSClient(ctx, cfg)
+		if err != nil {
+			logrus.WithError(err).Fatal("failed to create GCS client")
+		}
 	}
 	defer client.close()
 
+	// Fetch steps concurrently
 	results := make([]RunResult, len(targets))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, cfg.Concurrency)
+	var completedSteps int64
+
 	for i, t := range targets {
 		wg.Add(1)
 		go func(idx int, nr jobRun) {
@@ -388,6 +393,14 @@ func runPull(db *DB, cfg *Config, suffixes []string, group bool, useTable bool) 
 				Steps:     steps,
 				StepDirs:  stepDirs,
 				VariantID: variant,
+			}
+			n := atomic.AddInt64(&completedSteps, 1)
+			if n%20 == 0 || n == int64(len(targets)) {
+				logrus.WithFields(logrus.Fields{
+					"completed": n,
+					"total":     len(targets),
+					"gcs_calls": client.CallCount(),
+				}).Info("pulling steps progress")
 			}
 		}(i, t)
 	}

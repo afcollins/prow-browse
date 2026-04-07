@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"cloud.google.com/go/storage"
@@ -99,6 +100,55 @@ func (g *gcsClient) listRuns(ctx context.Context, job string) ([]string, error) 
 	}
 	logrus.WithFields(logrus.Fields{"job": job, "runs": len(runs), "api_calls": g.CallCount()}).Debug("listRuns complete")
 	return runs, nil
+}
+
+// findRunByID searches all jobs in GCS for a run matching the given ID suffix.
+func (g *gcsClient) findRunByID(ctx context.Context, suffix string) (string, string, error) {
+	jobs, err := g.listJobs(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	logrus.WithField("jobs", len(jobs)).Info("searching GCS for run ID")
+
+	type match struct{ job, runID string }
+	var mu sync.Mutex
+	var matches []match
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, g.cfg.Concurrency)
+
+	for _, job := range jobs {
+		wg.Add(1)
+		go func(j string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			runs, err := g.listRuns(ctx, j)
+			if err != nil {
+				logrus.WithError(err).WithField("job", j).Warn("failed to list runs")
+				return
+			}
+			for _, r := range runs {
+				if strings.HasSuffix(r, suffix) {
+					mu.Lock()
+					matches = append(matches, match{j, r})
+					mu.Unlock()
+				}
+			}
+		}(job)
+	}
+	wg.Wait()
+
+	if len(matches) == 0 {
+		return "", "", fmt.Errorf("no run found matching suffix %q in GCS", suffix)
+	}
+	if len(matches) > 1 {
+		for _, m := range matches {
+			logrus.WithFields(logrus.Fields{"job": m.job, "run_id": m.runID}).Warn("ambiguous match")
+		}
+		return "", "", fmt.Errorf("ambiguous: %d runs match suffix %q", len(matches), suffix)
+	}
+	return matches[0].job, matches[0].runID, nil
 }
 
 // listSteps returns a map of step names to existence, and for no-recurse steps,

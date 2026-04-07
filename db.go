@@ -317,6 +317,65 @@ func (d *DB) Stats() (jobs, runs, steps int, err error) {
 	return
 }
 
+// StoreRuns saves run entries without step data (used by fetch for lightweight discovery).
+func (d *DB) StoreRuns(results []RunResult) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO runs (job, run_id, variant) VALUES (?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, r := range results {
+		if _, err := stmt.Exec(r.Job, r.RunID, r.VariantID); err != nil {
+			return fmt.Errorf("inserting run %s/%s: %w", r.Job, r.RunID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// QueryRunsWithoutSteps returns runs that have no rows in the steps table.
+// Results are sorted by run_id descending (most recent first).
+func (d *DB) QueryRunsWithoutSteps(jobFilter string, limit int) ([]RunResult, error) {
+	query := `SELECT r.job, r.run_id, r.variant FROM runs r
+		LEFT JOIN steps s ON r.job = s.job AND r.run_id = s.run_id
+		WHERE s.step_name IS NULL`
+	var args []interface{}
+
+	if jobFilter != "" {
+		query += ` AND r.job LIKE ?`
+		args = append(args, "%"+jobFilter+"%")
+	}
+
+	query += ` ORDER BY r.run_id DESC`
+
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []RunResult
+	for rows.Next() {
+		var r RunResult
+		if err := rows.Scan(&r.Job, &r.RunID, &r.VariantID); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 // RunSQL executes an arbitrary read-only query and prints the results as a table.
 // Only SELECT statements are allowed.
 func (d *DB) RunSQL(query string) ([][]string, []string, error) {
