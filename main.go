@@ -420,7 +420,7 @@ func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns i
 func shortJobName(job string, cfg *Config) string {
 	prefix := cfg.JobPattern + "-"
 	if strings.HasPrefix(job, prefix) {
-		return "..." + strings.TrimPrefix(job, prefix)
+		return "-j " + strings.TrimPrefix(job, prefix)
 	}
 	return job
 }
