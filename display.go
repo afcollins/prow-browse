@@ -157,22 +157,37 @@ func isStepForPlatform(step, groupName string) bool {
 		return true
 	}
 
-	// Check if the step matches any platform-specific keyword.
-	// A step is platform-specific if any keyword matches. It should be shown
-	// if any of the matching platforms is the current group.
+	// Find which platforms match this step via their keywords.
+	// We use earliest-keyword-wins: once a keyword matches, only platforms
+	// that share that same keyword are considered. This means "ipi-conf-vsphere-check"
+	// matches "vsphere" first (vSphere is listed before AWS) and stops — it won't
+	// also match "ipi-" for AWS. But "rosa-sts-setup" matches "rosa" which is shared
+	// by both ROSA HCP and ROSA, so it shows on both pages.
+	firstKeyword := ""
 	isPlatformSpecific := false
+	matchesGroup := false
+
 	for _, p := range platforms {
 		for _, kw := range p.stepKeywords {
 			if strings.Contains(step, kw) {
-				isPlatformSpecific = true
-				if p.name == groupName {
-					return true
+				if firstKeyword == "" {
+					firstKeyword = kw
+				}
+				// Only consider matches for the same keyword as the first hit
+				if kw == firstKeyword {
+					isPlatformSpecific = true
+					if p.name == groupName {
+						matchesGroup = true
+					}
 				}
 			}
 		}
 	}
-	// Common step (no platform keyword matched) — show on all pages
-	return !isPlatformSpecific
+
+	if !isPlatformSpecific {
+		return true // common step — show on all pages
+	}
+	return matchesGroup
 }
 
 // displayGroupName returns the clean name for display (strips internal markers).
