@@ -64,7 +64,7 @@ func main() {
 			}
 
 			jobFilter, _ := cmd.Flags().GetString("jobs")
-			numRuns, _ := cmd.Flags().GetInt("n")
+			numRuns, _ := cmd.Flags().GetInt("number")
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
 
@@ -94,7 +94,7 @@ func main() {
 
 			jobFilter, _ := cmd.Flags().GetString("jobs")
 			showAll, _ := cmd.Flags().GetBool("all")
-			numRuns, _ := cmd.Flags().GetInt("n")
+			numRuns, _ := cmd.Flags().GetInt("number")
 
 			runFetch(db, cfg, jobFilter, showAll, numRuns)
 			return nil
@@ -115,7 +115,7 @@ func main() {
 			defer db.Close()
 
 			jobFilter, _ := cmd.Flags().GetString("jobs")
-			numRuns, _ := cmd.Flags().GetInt("n")
+			numRuns, _ := cmd.Flags().GetInt("number")
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
 

@@ -408,7 +408,7 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 		isOptional := pd.optionalSet[step]
 		for _, r := range pd.results {
 			if !r.Pulled {
-				fmt.Printf("%s❔%s", colorDim, colorReset)
+				fmt.Printf("%s❔%s ", colorDim, colorReset)
 			} else if result, exists := r.Steps[step]; exists {
 				switch result {
 				case StepSuccess:
@@ -416,7 +416,7 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 				case StepFailure:
 					fmt.Printf("%s❌%s ", colorRed, colorReset)
 				default:
-					fmt.Printf("%s👻%s", colorDim, colorReset)
+					fmt.Printf("%s👻%s ", colorDim, colorReset)
 				}
 			} else if isOptional {
 				fmt.Printf("%s..%s ", colorDim, colorReset)
