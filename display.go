@@ -272,14 +272,14 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 		group := groups[platform]
 
 		// Collect steps for this group's runs
-		groupSteps := make(map[string]bool)
+		groupSteps := make(map[string]StepResult)
 		groupResults := make([]RunResult, len(group))
 		groupEmojis := make([]string, len(group))
 		for i, ir := range group {
 			groupResults[i] = ir.result
 			groupEmojis[i] = ir.emoji
 			for step := range ir.result.Steps {
-				groupSteps[step] = true
+				groupSteps[step] = StepSuccess // value doesn't matter, just presence
 			}
 		}
 
@@ -396,7 +396,7 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 	for _, step := range pd.stepNames {
 		hasValue := false
 		for _, r := range pd.results {
-			if r.Steps[step] {
+			if _, exists := r.Steps[step]; exists {
 				hasValue = true
 				break
 			}
@@ -407,8 +407,17 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 		fmt.Printf("%-*s", maxStepLen+2, step)
 		isOptional := pd.optionalSet[step]
 		for _, r := range pd.results {
-			if r.Steps[step] {
-				fmt.Printf("%s✅%s ", colorGreen, colorReset)
+			if !r.Pulled {
+				fmt.Printf("%s❔%s", colorDim, colorReset)
+			} else if result, exists := r.Steps[step]; exists {
+				switch result {
+				case StepSuccess:
+					fmt.Printf("%s✅%s ", colorGreen, colorReset)
+				case StepFailure:
+					fmt.Printf("%s❌%s ", colorRed, colorReset)
+				default:
+					fmt.Printf("%s👻%s", colorDim, colorReset)
+				}
 			} else if isOptional {
 				fmt.Printf("%s..%s ", colorDim, colorReset)
 			} else if isStepExpectedForJob(step, pd.groupResults) {
@@ -425,13 +434,13 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 
 // orderSteps returns step names ordered by config step_order.
 // Steps not in the config order are appended alphabetically at the end.
-func orderSteps(allSteps map[string]bool, configOrder []string) []string {
+func orderSteps(allSteps map[string]StepResult, configOrder []string) []string {
 	var ordered []string
 	seen := make(map[string]bool)
 
 	// First add steps in config order (only if they exist in results)
 	for _, s := range configOrder {
-		if allSteps[s] {
+		if _, exists := allSteps[s]; exists {
 			ordered = append(ordered, s)
 			seen[s] = true
 		}
@@ -455,13 +464,21 @@ func orderSteps(allSteps map[string]bool, configOrder []string) []string {
 // job-specific and marked as "not applicable" for jobs that don't have them.
 func isStepExpectedForJob(step string, results []RunResult) bool {
 	count := 0
+	pulledCount := 0
 	for _, r := range results {
-		if r.Steps[step] {
+		if !r.Pulled {
+			continue
+		}
+		pulledCount++
+		if _, exists := r.Steps[step]; exists {
 			count++
 		}
 	}
-	// If a step appears in less than 30% of results, it's likely job-specific
-	threshold := len(results) * 30 / 100
+	if pulledCount == 0 {
+		return false
+	}
+	// If a step appears in less than 30% of pulled results, it's likely job-specific
+	threshold := pulledCount * 30 / 100
 	if threshold < 1 {
 		threshold = 1
 	}

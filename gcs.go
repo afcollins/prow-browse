@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -151,10 +153,9 @@ func (g *gcsClient) findRunByID(ctx context.Context, suffix string) (string, str
 	return matches[0].job, matches[0].runID, nil
 }
 
-// listSteps returns a map of step names to existence, and for no-recurse steps,
-// a map of step names to their immediate children.
-// Also returns the variant directory name.
-func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[string]bool, map[string][]string, string, error) {
+// listSteps discovers steps and their results by listing all objects under the
+// variant directory and reading finished.json for each step.
+func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[string]StepResult, map[string][]string, string, error) {
 	// First, find the variant directory under artifacts/
 	artifactsPrefix := g.cfg.Prefix + "/" + job + "/" + runID + "/artifacts/"
 	bucket := g.client.Bucket(g.cfg.Bucket)
@@ -185,30 +186,30 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 			dirName = strings.TrimSuffix(dirName, "/")
 			if !ignoreSet[dirName] {
 				variantDir = dirName
-				break // Use the first non-ignored directory as the variant
+				break
 			}
 		}
 	}
 
 	if variantDir == "" {
 		logrus.WithFields(logrus.Fields{"job": job, "run": runID, "api_calls": g.CallCount()}).Debug("listSteps: no variant found")
-		return make(map[string]bool), make(map[string][]string), "", nil
+		return make(map[string]StepResult), make(map[string][]string), "", nil
 	}
 
-	// List step directories under the variant
+	// Recursive list of all objects under variant (no delimiter)
 	stepsPrefix := artifactsPrefix + variantDir + "/"
-	query = &storage.Query{
-		Prefix:    stepsPrefix,
-		Delimiter: "/",
-	}
+	query = &storage.Query{Prefix: stepsPrefix}
 
 	g.incCalls()
-	steps := make(map[string]bool)
+	steps := make(map[string]StepResult)
 	stepDirs := make(map[string][]string)
 	noRecurseSet := make(map[string]bool)
 	for _, s := range g.cfg.NoRecurseSteps {
 		noRecurseSet[s] = true
 	}
+
+	// Track which steps have finished.json and collect no-recurse children
+	var finishedPaths []string
 
 	it = bucket.Objects(ctx, query)
 	for {
@@ -219,23 +220,79 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("listing steps for %s/%s: %w", job, runID, err)
 		}
-		if attrs.Prefix != "" {
-			stepName := strings.TrimPrefix(attrs.Prefix, stepsPrefix)
-			stepName = strings.TrimSuffix(stepName, "/")
-			steps[stepName] = true
+
+		relPath := strings.TrimPrefix(attrs.Name, stepsPrefix)
+		if relPath == "" {
+			continue
+		}
+
+		parts := strings.SplitN(relPath, "/", 2)
+		stepName := parts[0]
+
+		// Register step if not seen yet
+		if _, exists := steps[stepName]; !exists {
+			steps[stepName] = StepUnknown
+		}
+
+		if len(parts) == 2 {
+			subPath := parts[1]
+
+			// Track finished.json for reading
+			if subPath == "finished.json" {
+				finishedPaths = append(finishedPaths, attrs.Name)
+			}
+
+			// Collect no-recurse step children (immediate level only)
+			if noRecurseSet[stepName] {
+				childParts := strings.SplitN(subPath, "/", 2)
+				childName := childParts[0]
+				if len(childParts) == 2 {
+					childName += "/"
+				}
+				// Deduplicate children
+				found := false
+				for _, c := range stepDirs[stepName] {
+					if c == childName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					stepDirs[stepName] = append(stepDirs[stepName], childName)
+				}
+			}
 		}
 	}
 
-	// For no-recurse steps, list their immediate children
-	for stepName := range steps {
-		if noRecurseSet[stepName] {
-			children, err := g.listImmediateChildren(ctx, stepsPrefix+stepName+"/")
-			if err != nil {
-				logrus.WithError(err).WithField("step", stepName).Warn("failed to list step children")
-				continue
-			}
-			stepDirs[stepName] = children
-		}
+	// Read finished.json files concurrently to get step results
+	type stepResultPair struct {
+		step   string
+		result StepResult
+	}
+	resultCh := make(chan stepResultPair, len(finishedPaths))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, g.cfg.Concurrency)
+
+	for _, objName := range finishedPaths {
+		// Extract step name from path
+		relPath := strings.TrimPrefix(objName, stepsPrefix)
+		stepName := strings.SplitN(relPath, "/", 2)[0]
+
+		wg.Add(1)
+		go func(name, step string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			result := g.readFinishedJSON(ctx, name)
+			resultCh <- stepResultPair{step, result}
+		}(objName, stepName)
+	}
+	wg.Wait()
+	close(resultCh)
+
+	for pair := range resultCh {
+		steps[pair.step] = pair.result
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -243,6 +300,38 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		"steps": len(steps), "no_recurse": len(stepDirs), "api_calls": g.CallCount(),
 	}).Debug("listSteps complete")
 	return steps, stepDirs, variantDir, nil
+}
+
+// readFinishedJSON reads a finished.json object and returns the step result.
+func (g *gcsClient) readFinishedJSON(ctx context.Context, objectName string) StepResult {
+	g.incCalls()
+	reader, err := g.client.Bucket(g.cfg.Bucket).Object(objectName).NewReader(ctx)
+	if err != nil {
+		logrus.WithError(err).WithField("object", objectName).Debug("failed to read finished.json")
+		return StepUnknown
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return StepUnknown
+	}
+
+	var finished struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(data, &finished); err != nil {
+		return StepUnknown
+	}
+
+	switch finished.Result {
+	case "SUCCESS":
+		return StepSuccess
+	case "FAILURE":
+		return StepFailure
+	default:
+		return StepUnknown
+	}
 }
 
 // listImmediateChildren lists files and directories at the given prefix (one level).

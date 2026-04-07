@@ -63,7 +63,7 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 	var visibleSteps []string
 	for _, step := range pd.stepNames {
 		for _, r := range pd.results {
-			if r.Steps[step] {
+			if _, exists := r.Steps[step]; exists {
 				visibleSteps = append(visibleSteps, step)
 				break
 			}
@@ -97,9 +97,21 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 
 		isOptional := pd.optionalSet[step]
 		for _, r := range pd.results {
-			if r.Steps[step] {
-				row = append(row, "OK")
-				types = append(types, cellGreen)
+			if !r.Pulled {
+				row = append(row, "PULL")
+				types = append(types, cellDim)
+			} else if result, exists := r.Steps[step]; exists {
+				switch result {
+				case StepSuccess:
+					row = append(row, "OK")
+					types = append(types, cellGreen)
+				case StepFailure:
+					row = append(row, "FAIL")
+					types = append(types, cellRed)
+				default:
+					row = append(row, "UNWN")
+					types = append(types, cellDim)
+				}
 			} else if isOptional {
 				row = append(row, "..")
 				types = append(types, cellDim)
@@ -169,10 +181,12 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 	// Print key
 	fmt.Println(styleDim.Render(strings.Join([]string{
 		"  ",
-		styleGreen.Render("OK") + "=exists  ",
-		styleRed.Bold(true).Render("FAIL") + "=missing  ",
+		styleGreen.Render("OK") + "=success  ",
+		styleRed.Bold(true).Render("FAIL") + "=failure  ",
+		styleDim.Render("UNWN") + "=unknown  ",
 		styleDim.Render("..") + "=optional  ",
-		styleDim.Render("--") + "=n/a",
+		styleDim.Render("--") + "=n/a  ",
+		styleDim.Render("PULL") + "=not pulled",
 	}, "")))
 
 	fmt.Println()

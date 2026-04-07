@@ -20,17 +20,17 @@ func TestStoreAndQueryResults(t *testing.T) {
 	results := []RunResult{
 		{
 			Job: "job-a", RunID: "100", VariantID: "variant-a",
-			Steps:    map[string]bool{"step1": true, "step2": true},
+			Steps:    map[string]StepResult{"step1": StepSuccess, "step2": StepSuccess},
 			StepDirs: map[string][]string{"step1": {"child1", "child2"}},
 		},
 		{
 			Job: "job-a", RunID: "200", VariantID: "variant-a",
-			Steps:    map[string]bool{"step1": true},
+			Steps:    map[string]StepResult{"step1": StepSuccess},
 			StepDirs: map[string][]string{},
 		},
 		{
 			Job: "job-b", RunID: "300", VariantID: "variant-b",
-			Steps:    map[string]bool{"step3": true},
+			Steps:    map[string]StepResult{"step3": StepSuccess},
 			StepDirs: map[string][]string{},
 		},
 	}
@@ -65,14 +65,17 @@ func TestStoreAndQueryResults(t *testing.T) {
 			t.Fatalf("QueryResults: %v", err)
 		}
 		// Results are ordered run_id DESC, so 200 first
-		if !got[0].Steps["step1"] {
+		if _, exists := got[0].Steps["step1"]; !exists {
 			t.Error("run 200 should have step1")
 		}
-		if got[0].Steps["step2"] {
+		if _, exists := got[0].Steps["step2"]; exists {
 			t.Error("run 200 should not have step2")
 		}
-		if !got[1].Steps["step1"] || !got[1].Steps["step2"] {
-			t.Error("run 100 should have step1 and step2")
+		if _, e1 := got[1].Steps["step1"]; !e1 {
+			t.Error("run 100 should have step1")
+		}
+		if _, e2 := got[1].Steps["step2"]; !e2 {
+			t.Error("run 100 should have step2")
 		}
 	})
 
@@ -95,7 +98,7 @@ func TestStoreResultsReplacesStaleData(t *testing.T) {
 	// Store initial data with 2 steps
 	initial := []RunResult{{
 		Job: "job-a", RunID: "100", VariantID: "v",
-		Steps:    map[string]bool{"step1": true, "step2": true},
+		Steps:    map[string]StepResult{"step1": StepSuccess, "step2": StepSuccess},
 		StepDirs: map[string][]string{},
 	}}
 	if err := db.StoreResults(initial); err != nil {
@@ -105,7 +108,7 @@ func TestStoreResultsReplacesStaleData(t *testing.T) {
 	// Re-store with only 1 step (simulating re-fetch with updated data)
 	updated := []RunResult{{
 		Job: "job-a", RunID: "100", VariantID: "v",
-		Steps:    map[string]bool{"step1": true},
+		Steps:    map[string]StepResult{"step1": StepSuccess},
 		StepDirs: map[string][]string{},
 	}}
 	if err := db.StoreResults(updated); err != nil {
@@ -119,10 +122,10 @@ func TestStoreResultsReplacesStaleData(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d results, want 1", len(got))
 	}
-	if got[0].Steps["step2"] {
+	if _, exists := got[0].Steps["step2"]; exists {
 		t.Error("step2 should have been removed on re-store")
 	}
-	if !got[0].Steps["step1"] {
+	if _, exists := got[0].Steps["step1"]; !exists {
 		t.Error("step1 should still exist")
 	}
 }
@@ -180,7 +183,7 @@ func TestQueryRunsWithoutSteps(t *testing.T) {
 	// Store one run with steps (via StoreResults)
 	if err := db.StoreResults([]RunResult{{
 		Job: "job-a", RunID: "200", VariantID: "v",
-		Steps:    map[string]bool{"step1": true},
+		Steps:    map[string]StepResult{"step1": StepSuccess},
 		StepDirs: map[string][]string{},
 	}}); err != nil {
 		t.Fatalf("StoreResults: %v", err)
@@ -317,9 +320,9 @@ func TestStats(t *testing.T) {
 	})
 
 	if err := db.StoreResults([]RunResult{
-		{Job: "job-a", RunID: "100", Steps: map[string]bool{"s1": true, "s2": true}, StepDirs: map[string][]string{}},
-		{Job: "job-a", RunID: "200", Steps: map[string]bool{"s1": true}, StepDirs: map[string][]string{}},
-		{Job: "job-b", RunID: "300", Steps: map[string]bool{"s3": true}, StepDirs: map[string][]string{}},
+		{Job: "job-a", RunID: "100", Steps: map[string]StepResult{"s1": StepSuccess, "s2": StepSuccess}, StepDirs: map[string][]string{}},
+		{Job: "job-a", RunID: "200", Steps: map[string]StepResult{"s1": StepSuccess}, StepDirs: map[string][]string{}},
+		{Job: "job-b", RunID: "300", Steps: map[string]StepResult{"s3": StepSuccess}, StepDirs: map[string][]string{}},
 	}); err != nil {
 		t.Fatalf("StoreResults: %v", err)
 	}

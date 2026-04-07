@@ -44,6 +44,7 @@ func initSchema(db *sql.DB) error {
 			job       TEXT NOT NULL,
 			run_id    TEXT NOT NULL,
 			step_name TEXT NOT NULL,
+			result    INTEGER NOT NULL DEFAULT 3,
 			PRIMARY KEY (job, run_id, step_name),
 			FOREIGN KEY (job, run_id) REFERENCES runs(job, run_id)
 		);
@@ -60,7 +61,13 @@ func initSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_runs_job ON runs(job);
 		CREATE INDEX IF NOT EXISTS idx_steps_run ON steps(job, run_id);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migrate: add result column if it doesn't exist (for existing databases)
+	_, _ = db.Exec(`ALTER TABLE steps ADD COLUMN result INTEGER NOT NULL DEFAULT 3`)
+	return nil
 }
 
 // StoreResults saves a batch of RunResults to the database.
@@ -77,7 +84,7 @@ func (d *DB) StoreResults(results []RunResult) error {
 	}
 	defer runStmt.Close()
 
-	stepStmt, err := tx.Prepare(`INSERT OR REPLACE INTO steps (job, run_id, step_name) VALUES (?, ?, ?)`)
+	stepStmt, err := tx.Prepare(`INSERT OR REPLACE INTO steps (job, run_id, step_name, result) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -112,8 +119,8 @@ func (d *DB) StoreResults(results []RunResult) error {
 		if _, err := runStmt.Exec(r.Job, r.RunID, r.VariantID); err != nil {
 			return fmt.Errorf("inserting run %s/%s: %w", r.Job, r.RunID, err)
 		}
-		for stepName := range r.Steps {
-			if _, err := stepStmt.Exec(r.Job, r.RunID, stepName); err != nil {
+		for stepName, result := range r.Steps {
+			if _, err := stepStmt.Exec(r.Job, r.RunID, stepName, int(result)); err != nil {
 				return fmt.Errorf("inserting step %s: %w", stepName, err)
 			}
 			if children, ok := r.StepDirs[stepName]; ok {
@@ -189,23 +196,24 @@ func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
 			Job:       ri.job,
 			RunID:     ri.runID,
 			VariantID: ri.variant,
-			Steps:     make(map[string]bool),
+			Steps:     make(map[string]StepResult),
 			StepDirs:  make(map[string][]string),
 		}
 
 		stepRows, err := d.db.Query(
-			`SELECT step_name FROM steps WHERE job = ? AND run_id = ?`,
+			`SELECT step_name, result FROM steps WHERE job = ? AND run_id = ?`,
 			ri.job, ri.runID)
 		if err != nil {
 			return nil, err
 		}
 		for stepRows.Next() {
 			var name string
-			if err := stepRows.Scan(&name); err != nil {
+			var result int
+			if err := stepRows.Scan(&name, &result); err != nil {
 				stepRows.Close()
 				return nil, err
 			}
-			r.Steps[name] = true
+			r.Steps[name] = StepResult(result)
 		}
 		stepRows.Close()
 
@@ -225,6 +233,7 @@ func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
 		}
 		childRows.Close()
 
+		r.Pulled = len(r.Steps) > 0
 		results = append(results, r)
 	}
 

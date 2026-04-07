@@ -13,12 +13,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// StepResult represents the outcome of a single step.
+type StepResult int
+
+const (
+	StepMissing StepResult = 0 // step directory not present
+	StepSuccess StepResult = 1 // finished.json result=SUCCESS
+	StepFailure StepResult = 2 // finished.json result=FAILURE
+	StepUnknown StepResult = 3 // step dir exists but no finished.json or unreadable
+)
+
 type RunResult struct {
 	Job       string
 	RunID     string
-	Steps     map[string]bool     // step name -> exists
-	StepDirs  map[string][]string // step name -> immediate children (for no-recurse steps)
-	VariantID string              // the variant directory name (e.g., "control-plane-120nodes")
+	Steps     map[string]StepResult // step name -> result
+	StepDirs  map[string][]string   // step name -> immediate children (for no-recurse steps)
+	VariantID string                // the variant directory name (e.g., "control-plane-120nodes")
+	Pulled    bool                  // true if step data has been fetched from GCS
 }
 
 func main() {
@@ -379,7 +390,7 @@ func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns i
 					"job": shortJobName(nr.job, cfg),
 					"run": nr.runID,
 				}).Warn("failed to list steps")
-				steps = make(map[string]bool)
+				steps = make(map[string]StepResult)
 				stepDirs = make(map[string][]string)
 			}
 			results[idx] = RunResult{

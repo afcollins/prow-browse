@@ -161,12 +161,12 @@ func TestDisplayGroupName(t *testing.T) {
 
 func TestOrderSteps(t *testing.T) {
 	t.Run("config order first then alphabetical", func(t *testing.T) {
-		allSteps := map[string]bool{
-			"zebra": true,
-			"alpha": true,
-			"ipi-conf": true,
-			"ipi-install": true,
-			"middle": true,
+		allSteps := map[string]StepResult{
+			"zebra":       StepSuccess,
+			"alpha":       StepSuccess,
+			"ipi-conf":    StepSuccess,
+			"ipi-install": StepSuccess,
+			"middle":      StepSuccess,
 		}
 		configOrder := []string{"ipi-conf", "ipi-install", "not-present"}
 
@@ -184,7 +184,7 @@ func TestOrderSteps(t *testing.T) {
 	})
 
 	t.Run("empty config order", func(t *testing.T) {
-		allSteps := map[string]bool{"c": true, "a": true, "b": true}
+		allSteps := map[string]StepResult{"c": StepSuccess, "a": StepSuccess, "b": StepSuccess}
 		got := orderSteps(allSteps, nil)
 		want := []string{"a", "b", "c"}
 
@@ -196,7 +196,7 @@ func TestOrderSteps(t *testing.T) {
 	})
 
 	t.Run("empty steps", func(t *testing.T) {
-		got := orderSteps(map[string]bool{}, []string{"a", "b"})
+		got := orderSteps(make(map[string]StepResult), []string{"a", "b"})
 		if len(got) != 0 {
 			t.Errorf("orderSteps(empty) returned %d steps, want 0", len(got))
 		}
@@ -207,9 +207,10 @@ func TestIsStepExpectedForJob(t *testing.T) {
 	makeResults := func(n int, stepPresent int) []RunResult {
 		results := make([]RunResult, n)
 		for i := range results {
-			results[i].Steps = map[string]bool{}
+			results[i].Pulled = true
+			results[i].Steps = make(map[string]StepResult)
 			if i < stepPresent {
-				results[i].Steps["test-step"] = true
+				results[i].Steps["test-step"] = StepSuccess
 			}
 		}
 		return results
@@ -240,6 +241,31 @@ func TestIsStepExpectedForJob(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("unpulled runs excluded from threshold", func(t *testing.T) {
+		results := []RunResult{
+			{Pulled: true, Steps: map[string]StepResult{"test-step": StepSuccess}},
+			{Pulled: true, Steps: map[string]StepResult{"test-step": StepSuccess}},
+			{Pulled: false, Steps: map[string]StepResult{}}, // unpulled — should not count
+			{Pulled: false, Steps: map[string]StepResult{}},
+		}
+		// 2/2 pulled have the step = 100%, should be expected
+		got := isStepExpectedForJob("test-step", results)
+		if !got {
+			t.Error("expected step to be expected when only counting pulled runs")
+		}
+	})
+
+	t.Run("all unpulled returns false", func(t *testing.T) {
+		results := []RunResult{
+			{Pulled: false, Steps: map[string]StepResult{}},
+			{Pulled: false, Steps: map[string]StepResult{}},
+		}
+		got := isStepExpectedForJob("test-step", results)
+		if got {
+			t.Error("expected false when no runs are pulled")
+		}
+	})
 }
 
 func TestCountUniqueJobs(t *testing.T) {
