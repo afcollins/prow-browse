@@ -130,6 +130,41 @@ func TestStoreResultsReplacesStaleData(t *testing.T) {
 	}
 }
 
+func TestQueryResultsSetsPulledFlag(t *testing.T) {
+	db := newTestDB(t)
+
+	// Store a run without steps (via StoreRuns) and one with steps (via StoreResults)
+	if err := db.StoreRuns([]RunResult{
+		{Job: "job-a", RunID: "100"},
+		{Job: "job-a", RunID: "200"},
+	}); err != nil {
+		t.Fatalf("StoreRuns: %v", err)
+	}
+	if err := db.StoreResults([]RunResult{{
+		Job: "job-a", RunID: "200", VariantID: "v",
+		Steps:    map[string]StepResult{"step1": StepSuccess},
+		StepDirs: map[string][]string{},
+	}}); err != nil {
+		t.Fatalf("StoreResults: %v", err)
+	}
+
+	got, err := db.QueryResults("job-a")
+	if err != nil {
+		t.Fatalf("QueryResults: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d results, want 2", len(got))
+	}
+
+	// Results are ordered by run_id DESC: 200 first, 100 second
+	if !got[0].Pulled {
+		t.Error("run 200 (has steps) should have Pulled = true")
+	}
+	if got[1].Pulled {
+		t.Error("run 100 (no steps) should have Pulled = false")
+	}
+}
+
 func TestStoreRuns(t *testing.T) {
 	db := newTestDB(t)
 

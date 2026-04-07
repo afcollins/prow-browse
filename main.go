@@ -420,7 +420,8 @@ func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns i
 		logrus.WithField("count", len(results)).Info("updated runs in local database")
 	}
 
-	displayGrid(results, cfg, group, useTable)
+	// Display from DB so Pulled flag is set correctly
+	runLocal(db, cfg, jobFilter, len(targets), group, useTable)
 }
 
 func shortJobName(job string, cfg *Config) string {
