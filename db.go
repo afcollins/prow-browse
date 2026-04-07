@@ -149,9 +149,7 @@ func (d *DB) SeenRuns(job string) (map[string]bool, error) {
 }
 
 // QueryResults loads RunResults from the database, filtered by an optional job substring.
-// If limit > 0, only the N most recent runs per job are returned.
-func (d *DB) QueryResults(jobFilter string, limit int) ([]RunResult, error) {
-	// Build the query for runs
+func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
 	query := `SELECT job, run_id, variant FROM runs`
 	var args []interface{}
 
@@ -168,23 +166,15 @@ func (d *DB) QueryResults(jobFilter string, limit int) ([]RunResult, error) {
 	}
 	defer rows.Close()
 
-	// Collect runs, applying per-job limit
 	type runInfo struct {
 		job, runID, variant string
 	}
 	var allRuns []runInfo
-	jobRunCount := make(map[string]int)
 
 	for rows.Next() {
 		var ri runInfo
 		if err := rows.Scan(&ri.job, &ri.runID, &ri.variant); err != nil {
 			return nil, err
-		}
-		if limit > 0 {
-			jobRunCount[ri.job]++
-			if jobRunCount[ri.job] > limit {
-				continue
-			}
 		}
 		allRuns = append(allRuns, ri)
 	}

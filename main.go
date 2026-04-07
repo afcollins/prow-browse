@@ -53,16 +53,11 @@ func main() {
 			}
 
 			jobFilter, _ := cmd.Flags().GetString("jobs")
-			limit, _ := cmd.Flags().GetInt("limit")
 			numRuns, _ := cmd.Flags().GetInt("n")
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
 
-			displayLimit := cfg.MaxRunsPerJob
-			if limit > 0 {
-				displayLimit = limit
-			}
-			runLocal(db, cfg, jobFilter, displayLimit, numRuns, group, useTable)
+			runLocal(db, cfg, jobFilter, numRuns, group, useTable)
 			return nil
 		},
 	}
@@ -70,8 +65,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "prow-status.db", "SQLite database path")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
 	rootCmd.Flags().StringP("jobs", "j",  "", "Filter job names by substring")
-	rootCmd.Flags().IntP("limit", "l",  0, "Max runs per job (0 = config default)")
-	rootCmd.Flags().IntP("n", "n", 0, "Max total runs, most recent first (0 = all)")
+	rootCmd.Flags().IntP("number", "n", 0, "Max runs to display, most recent first (0 = all)")
 	rootCmd.Flags().Bool("stats", false, "Show database statistics")
 	rootCmd.Flags().String("query", "", "Run a SQL query against the local database")
 	rootCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
@@ -142,8 +136,8 @@ func openConfigAndDB(configPath, dbPath string) (*Config, *DB, error) {
 	return cfg, db, nil
 }
 
-func runLocal(db *DB, cfg *Config, jobFilter string, limit int, numRuns int, group bool, useTable bool) {
-	results, err := db.QueryResults(jobFilter, limit)
+func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, useTable bool) {
+	results, err := db.QueryResults(jobFilter)
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to query database")
 	}
@@ -152,6 +146,7 @@ func runLocal(db *DB, cfg *Config, jobFilter string, limit int, numRuns int, gro
 		return
 	}
 
+	// Apply global limit: most recent N runs across all jobs
 	if numRuns > 0 {
 		sort.Slice(results, func(i, j int) bool {
 			return results[i].RunID > results[j].RunID

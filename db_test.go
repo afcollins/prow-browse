@@ -40,7 +40,7 @@ func TestStoreAndQueryResults(t *testing.T) {
 	}
 
 	t.Run("query all", func(t *testing.T) {
-		got, err := db.QueryResults("", 0)
+		got, err := db.QueryResults("")
 		if err != nil {
 			t.Fatalf("QueryResults: %v", err)
 		}
@@ -50,28 +50,17 @@ func TestStoreAndQueryResults(t *testing.T) {
 	})
 
 	t.Run("query with job filter", func(t *testing.T) {
-		got, err := db.QueryResults("job-a", 0)
+		got, err := db.QueryResults("job-a")
 		if err != nil {
 			t.Fatalf("QueryResults: %v", err)
 		}
-		if len(got) != 2 {
-			t.Fatalf("got %d results, want 2", len(got))
-		}
-	})
-
-	t.Run("query with limit", func(t *testing.T) {
-		got, err := db.QueryResults("", 1)
-		if err != nil {
-			t.Fatalf("QueryResults: %v", err)
-		}
-		// 1 per job = 2 results (job-a gets 1, job-b gets 1)
 		if len(got) != 2 {
 			t.Fatalf("got %d results, want 2", len(got))
 		}
 	})
 
 	t.Run("steps loaded correctly", func(t *testing.T) {
-		got, err := db.QueryResults("job-a", 0)
+		got, err := db.QueryResults("job-a")
 		if err != nil {
 			t.Fatalf("QueryResults: %v", err)
 		}
@@ -88,7 +77,7 @@ func TestStoreAndQueryResults(t *testing.T) {
 	})
 
 	t.Run("step children loaded", func(t *testing.T) {
-		got, err := db.QueryResults("job-a", 0)
+		got, err := db.QueryResults("job-a")
 		if err != nil {
 			t.Fatalf("QueryResults: %v", err)
 		}
@@ -123,7 +112,7 @@ func TestStoreResultsReplacesStaleData(t *testing.T) {
 		t.Fatalf("StoreResults updated: %v", err)
 	}
 
-	got, err := db.QueryResults("job-a", 0)
+	got, err := db.QueryResults("job-a")
 	if err != nil {
 		t.Fatalf("QueryResults: %v", err)
 	}
@@ -166,7 +155,7 @@ func TestStoreRuns(t *testing.T) {
 			t.Fatalf("StoreRuns duplicate: %v", err)
 		}
 		// Should not error, just ignore
-		got, err := db.QueryResults("job-a", 0)
+		got, err := db.QueryResults("job-a")
 		if err != nil {
 			t.Fatalf("QueryResults: %v", err)
 		}
