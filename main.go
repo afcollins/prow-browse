@@ -40,7 +40,7 @@ func main() {
 	var verbose bool
 
 	rootCmd := &cobra.Command{
-		Use:   "prow-status",
+		Use:   "prow-status [run-id-suffix ...]",
 		Short: "Display Prow CI job status grid from local database",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if verbose {
@@ -67,6 +67,19 @@ func main() {
 			numRuns, _ := cmd.Flags().GetInt("number")
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
+
+			if len(args) > 0 {
+				runIDs, err := resolveRunIDs(db, args)
+				if err != nil {
+					return err
+				}
+				results, err := db.QueryResultsByRunIDs(runIDs)
+				if err != nil {
+					return fmt.Errorf("failed to query runs: %w", err)
+				}
+				displayGrid(results, cfg, group, useTable)
+				return nil
+			}
 
 			runLocal(db, cfg, jobFilter, numRuns, group, useTable)
 			return nil
@@ -145,6 +158,19 @@ func openConfigAndDB(configPath, dbPath string) (*Config, *DB, error) {
 		return nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	return cfg, db, nil
+}
+
+// resolveRunIDs resolves run ID suffixes to full run IDs via the database.
+func resolveRunIDs(db *DB, suffixes []string) ([]string, error) {
+	var runIDs []string
+	for _, suffix := range suffixes {
+		_, runID, err := db.ResolveRunID(suffix)
+		if err != nil {
+			return nil, fmt.Errorf("run ID %q: %w", suffix, err)
+		}
+		runIDs = append(runIDs, runID)
+	}
+	return runIDs, nil
 }
 
 func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, useTable bool) {
@@ -420,8 +446,17 @@ func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns i
 		logrus.WithField("count", len(results)).Info("updated runs in local database")
 	}
 
-	// Display from DB so Pulled flag is set correctly
-	runLocal(db, cfg, jobFilter, len(targets), group, useTable)
+	// Re-query from DB so Pulled flag is set correctly
+	runIDs := make([]string, len(targets))
+	for i, t := range targets {
+		runIDs[i] = t.runID
+	}
+	dbResults, err := db.QueryResultsByRunIDs(runIDs)
+	if err != nil {
+		logrus.WithError(err).Error("failed to query pulled results")
+		return
+	}
+	displayGrid(dbResults, cfg, group, useTable)
 }
 
 func shortJobName(job string, cfg *Config) string {

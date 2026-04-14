@@ -155,6 +155,10 @@ func (d *DB) SeenRuns(job string) (map[string]bool, error) {
 	return seen, rows.Err()
 }
 
+type runInfo struct {
+	job, runID, variant string
+}
+
 // QueryResults loads RunResults from the database, filtered by an optional job substring.
 func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
 	query := `SELECT job, run_id, variant FROM runs`
@@ -173,11 +177,7 @@ func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
 	}
 	defer rows.Close()
 
-	type runInfo struct {
-		job, runID, variant string
-	}
 	var allRuns []runInfo
-
 	for rows.Next() {
 		var ri runInfo
 		if err := rows.Scan(&ri.job, &ri.runID, &ri.variant); err != nil {
@@ -189,7 +189,48 @@ func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
 		return nil, err
 	}
 
-	// Load steps and children for each run
+	return d.loadRunDetails(allRuns)
+}
+
+// QueryResultsByRunIDs returns results for specific run IDs from the database.
+func (d *DB) QueryResultsByRunIDs(runIDs []string) ([]RunResult, error) {
+	if len(runIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(runIDs))
+	args := make([]interface{}, len(runIDs))
+	for i, id := range runIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := `SELECT job, run_id, variant FROM runs WHERE run_id IN (` +
+		strings.Join(placeholders, ",") + `) ORDER BY run_id DESC`
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var allRuns []runInfo
+	for rows.Next() {
+		var ri runInfo
+		if err := rows.Scan(&ri.job, &ri.runID, &ri.variant); err != nil {
+			return nil, err
+		}
+		allRuns = append(allRuns, ri)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return d.loadRunDetails(allRuns)
+}
+
+// loadRunDetails loads steps and children for a set of runs.
+func (d *DB) loadRunDetails(allRuns []runInfo) ([]RunResult, error) {
 	results := make([]RunResult, 0, len(allRuns))
 	for _, ri := range allRuns {
 		r := RunResult{
