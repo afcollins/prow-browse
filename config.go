@@ -3,7 +3,10 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
+
+const appName = "prow-status"
 
 type Config struct {
 	Bucket            string   `json:"bucket"`
@@ -17,6 +20,31 @@ type Config struct {
 	MaxRunsPerJob     int      `json:"max_runs_per_job"`
 	Concurrency       int      `json:"concurrency"`
 	ColumnsPerPage    int      `json:"columns_per_page"`
+}
+
+// defaultConfigPath returns the config path, checking ./config.json first,
+// then ~/.config/prow-status/config.json.
+func defaultConfigPath() string {
+	local := "config.json"
+	if _, err := os.Stat(local); err == nil {
+		return local
+	}
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, appName, "config.json")
+}
+
+// defaultDBPath returns ~/.local/share/prow-status/prow-status.db.
+func defaultDBPath() string {
+	dir := os.Getenv("XDG_DATA_HOME")
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(dir, appName, appName+".db")
 }
 
 func loadConfig(path string) (*Config, error) {

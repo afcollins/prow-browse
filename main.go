@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -85,8 +86,8 @@ func main() {
 			return nil
 		},
 	}
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.json", "Config file path")
-	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "prow-status.db", "SQLite database path")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Config file path")
+	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "", "SQLite database path")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
 	rootCmd.Flags().StringP("jobs", "j",  "", "Filter job names by substring")
 	rootCmd.Flags().IntP("number", "n", 0, "Max runs to display, most recent first (0 = all)")
@@ -149,10 +150,24 @@ func main() {
 }
 
 func openConfigAndDB(configPath, dbPath string) (*Config, *DB, error) {
+	if configPath == "" {
+		configPath = defaultConfigPath()
+	}
+	if dbPath == "" {
+		dbPath = defaultDBPath()
+	}
+
 	cfg, err := loadConfig(configPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+		return nil, nil, fmt.Errorf("failed to load config %s: %w", configPath, err)
 	}
+
+	if dir := filepath.Dir(dbPath); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, nil, fmt.Errorf("failed to create db directory %s: %w", dir, err)
+		}
+	}
+
 	db, err := openDB(dbPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open database: %w", err)
