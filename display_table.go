@@ -56,6 +56,9 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 			line += fmt.Sprintf("  %s", styleDim.Render("("+r.VariantID+")"))
 		}
 		fmt.Println(line)
+		if pd.showURLs {
+			fmt.Printf("      %s\n", styleDim.Render(runURL(cfg, r)))
+		}
 	}
 	fmt.Println()
 

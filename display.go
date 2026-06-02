@@ -205,9 +205,16 @@ type pageData struct {
 	stepNames    []string
 	groupResults []RunResult // all results in this platform group (for expected-step heuristic)
 	optionalSet  map[string]bool
+	showURLs     bool
 }
 
-func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTable bool) {
+const gcsWebBaseURL = "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/"
+
+func runURL(cfg *Config, r RunResult) string {
+	return gcsWebBaseURL + cfg.Bucket + "/" + cfg.Prefix + "/" + r.Job + "/" + r.RunID + "/"
+}
+
+func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTable bool, showURLs bool) {
 	if len(results) == 0 {
 		return
 	}
@@ -317,6 +324,7 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 				stepNames:    stepNames,
 				groupResults: groupResults,
 				optionalSet:  optionalSet,
+				showURLs:     showURLs,
 			}
 
 			if useTable {
@@ -379,6 +387,9 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 			fmt.Printf("  %s(%s)%s", colorDim, r.VariantID, colorReset)
 		}
 		fmt.Println()
+		if pd.showURLs {
+			fmt.Printf("      %s%s%s\n", colorDim, runURL(cfg, r), colorReset)
+		}
 	}
 	fmt.Println()
 

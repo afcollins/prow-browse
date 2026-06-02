@@ -68,6 +68,7 @@ func main() {
 			numRuns, _ := cmd.Flags().GetInt("number")
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
+			showURLs, _ := cmd.Flags().GetBool("urls")
 
 			if len(args) > 0 {
 				runIDs, err := resolveRunIDs(db, args)
@@ -78,11 +79,11 @@ func main() {
 				if err != nil {
 					return fmt.Errorf("failed to query runs: %w", err)
 				}
-				displayGrid(results, cfg, group, useTable)
+				displayGrid(results, cfg, group, useTable, showURLs)
 				return nil
 			}
 
-			runLocal(db, cfg, jobFilter, numRuns, group, useTable)
+			runLocal(db, cfg, jobFilter, numRuns, group, useTable, showURLs)
 			return nil
 		},
 	}
@@ -95,6 +96,7 @@ func main() {
 	rootCmd.Flags().String("query", "", "Run a SQL query against the local database")
 	rootCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
 	rootCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
+	rootCmd.Flags().BoolP("urls", "u", false, "Show GCS web URLs for each run")
 
 	fetchCmd := &cobra.Command{
 		Use:   "fetch",
@@ -132,8 +134,9 @@ func main() {
 			numRuns, _ := cmd.Flags().GetInt("number")
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
+			showURLs, _ := cmd.Flags().GetBool("urls")
 
-			runPull(db, cfg, args, jobFilter, numRuns, group, useTable)
+			runPull(db, cfg, args, jobFilter, numRuns, group, useTable, showURLs)
 			return nil
 		},
 	}
@@ -141,6 +144,7 @@ func main() {
 	pullCmd.Flags().IntP("number", "n", 0, "Max runs to pull (latest unpulled, 0 = all unpulled)")
 	pullCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
 	pullCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
+	pullCmd.Flags().BoolP("urls", "u", false, "Show GCS web URLs for each run")
 
 	rootCmd.AddCommand(fetchCmd, pullCmd)
 
@@ -188,7 +192,7 @@ func resolveRunIDs(db *DB, suffixes []string) ([]string, error) {
 	return runIDs, nil
 }
 
-func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, useTable bool) {
+func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, useTable bool, showURLs bool) {
 	results, err := db.QueryResults(jobFilter)
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to query database")
@@ -209,7 +213,7 @@ func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, us
 	}
 
 	logrus.WithField("count", len(results)).Info("loaded runs from local database")
-	displayGrid(results, cfg, group, useTable)
+	displayGrid(results, cfg, group, useTable, showURLs)
 }
 
 func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, depth int) {
@@ -343,7 +347,8 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, depth int) {
 	fmt.Printf("\n%d new runs stored. Use 'prow-status pull -n <N>' to fetch step data.\n", len(newRuns))
 }
 
-func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns int, group bool, useTable bool) {
+// TODO Audit this function to see what it is actually listing because it takes far too long
+func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns int, group bool, useTable bool, showURLs bool) {
 	type jobRun struct {
 		job   string
 		runID string
@@ -471,7 +476,7 @@ func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns i
 		logrus.WithError(err).Error("failed to query pulled results")
 		return
 	}
-	displayGrid(dbResults, cfg, group, useTable)
+	displayGrid(dbResults, cfg, group, useTable, showURLs)
 }
 
 func shortJobName(job string, cfg *Config) string {
