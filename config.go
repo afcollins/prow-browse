@@ -20,6 +20,7 @@ type Config struct {
 	MaxRunsPerJob      int      `json:"max_runs_per_job"`
 	Concurrency        int      `json:"concurrency"`
 	ColumnsPerPage     int      `json:"columns_per_page"`
+	DownloadDir        string   `json:"download_dir"`
 }
 
 // defaultConfigPath returns the config path, checking ./config.json first,
@@ -70,6 +71,10 @@ func loadConfig(path string) (*Config, error) {
 	}
 	if cfg.ColumnsPerPage == 0 {
 		cfg.ColumnsPerPage = 50
+	}
+	if cfg.DownloadDir == "" {
+		home, _ := os.UserHomeDir()
+		cfg.DownloadDir = filepath.Join(home, "Downloads", "prow")
 	}
 
 	return &cfg, nil

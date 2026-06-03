@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -146,7 +147,28 @@ func main() {
 	pullCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
 	pullCmd.Flags().BoolP("urls", "u", false, "Show GCS web URLs for each run")
 
-	rootCmd.AddCommand(fetchCmd, pullCmd)
+	browseCmd := &cobra.Command{
+		Use:   "browse <run-id-suffix>",
+		Short: "Interactively browse and download artifacts for a run",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, db, err := openConfigAndDB(configPath, dbPath)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+
+			outputDir, _ := cmd.Flags().GetString("output")
+			if outputDir == "" {
+				outputDir = cfg.DownloadDir
+			}
+
+			return runBrowse(db, cfg, args[0], outputDir)
+		},
+	}
+	browseCmd.Flags().StringP("output", "o", "", "Download directory (default ~/Downloads/prow)")
+
+	rootCmd.AddCommand(fetchCmd, pullCmd, browseCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -501,6 +523,57 @@ func printStats(db *DB) {
 	for _, j := range dbJobs {
 		logrus.WithField("name", j).Info("stored job")
 	}
+}
+
+func runBrowse(db *DB, cfg *Config, suffix, outputDir string) error {
+	ctx := context.Background()
+
+	job, runID, err := db.ResolveRunID(suffix)
+	if err != nil {
+		logrus.WithField("suffix", suffix).Info("not found in DB, will search GCS on expand")
+	}
+
+	client, err := newGCSClient(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create GCS client: %w", err)
+	}
+	defer client.close()
+
+	if job == "" {
+		job, runID, err = client.findRunByID(ctx, suffix)
+		if err != nil {
+			return fmt.Errorf("run ID %q: %w", suffix, err)
+		}
+	}
+
+	results, err := db.QueryResultsByRunIDs([]string{runID})
+	if err != nil || len(results) == 0 {
+		results = []RunResult{{Job: job, RunID: runID, Steps: make(map[string]StepResult)}}
+	}
+
+	if !results[0].Pulled {
+		fmt.Printf("Pulling step data for %s...\n", runID)
+		steps, stepDirs, variant, pullErr := client.listSteps(ctx, job, runID)
+		if pullErr != nil {
+			return fmt.Errorf("pulling steps: %w", pullErr)
+		}
+		results[0].Steps = steps
+		results[0].StepDirs = stepDirs
+		results[0].VariantID = variant
+		results[0].Pulled = true
+		if err := db.StoreResults(results); err != nil {
+			logrus.WithError(err).Warn("failed to store pulled results")
+		}
+		// Re-query to get clean DB state
+		if dbResults, err := db.QueryResultsByRunIDs([]string{runID}); err == nil && len(dbResults) > 0 {
+			results = dbResults
+		}
+	}
+
+	model := newBrowseModel(client, cfg, results[0], outputDir)
+	p := tea.NewProgram(model)
+	_, err = p.Run()
+	return err
 }
 
 func runQuery(db *DB, query string) {
