@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/sirupsen/logrus"
@@ -15,13 +18,23 @@ import (
 )
 
 type gcsClient struct {
-	client   *storage.Client
-	cfg      *Config
-	apiCalls int64 // atomic counter of GCS list operations
+	client    *storage.Client
+	cfg       *Config
+	apiCalls  int64
+	fileLog   *logrus.Logger
+	logFile   *os.File
+	startTime time.Time
 }
 
-func (g *gcsClient) incCalls() {
+func (g *gcsClient) logCall(op, path string, d time.Duration) {
 	atomic.AddInt64(&g.apiCalls, 1)
+	if g.fileLog != nil {
+		g.fileLog.WithFields(logrus.Fields{
+			"op":   op,
+			"path": path,
+			"ms":   d.Milliseconds(),
+		}).Trace("gcs_call")
+	}
 }
 
 func (g *gcsClient) CallCount() int64 {
@@ -33,10 +46,41 @@ func newGCSClient(ctx context.Context, cfg *Config) (*gcsClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating storage client: %w", err)
 	}
-	return &gcsClient{client: client, cfg: cfg}, nil
+
+	gc := &gcsClient{client: client, cfg: cfg, startTime: time.Now()}
+
+	logDir := defaultDataDir()
+	logPath := filepath.Join(logDir, "gcs.log")
+	if err := os.MkdirAll(logDir, 0755); err == nil {
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			gc.logFile = f
+			gc.fileLog = logrus.New()
+			gc.fileLog.SetOutput(f)
+			gc.fileLog.SetLevel(logrus.TraceLevel)
+			gc.fileLog.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+			gc.fileLog.WithFields(logrus.Fields{
+				"bucket": cfg.Bucket,
+				"prefix": cfg.Prefix,
+			}).Info("gcs_session_start")
+		} else {
+			logrus.WithError(err).Debug("failed to open GCS log file")
+		}
+	}
+
+	return gc, nil
 }
 
 func (g *gcsClient) close() {
+	if g.fileLog != nil {
+		g.fileLog.WithFields(logrus.Fields{
+			"calls":      g.CallCount(),
+			"elapsed_ms": time.Since(g.startTime).Milliseconds(),
+		}).Info("gcs_session_end")
+	}
+	if g.logFile != nil {
+		g.logFile.Close()
+	}
 	g.client.Close()
 }
 
@@ -50,7 +94,7 @@ func (g *gcsClient) listJobs(ctx context.Context) ([]string, error) {
 		Delimiter: "/",
 	}
 
-	g.incCalls()
+	t0 := time.Now()
 	var jobs []string
 	it := bucket.Objects(ctx, query)
 	for {
@@ -67,6 +111,7 @@ func (g *gcsClient) listJobs(ctx context.Context) ([]string, error) {
 			jobs = append(jobs, name)
 		}
 	}
+	g.logCall("listJobs", prefix, time.Since(t0))
 	logrus.WithFields(logrus.Fields{"jobs": len(jobs), "api_calls": g.CallCount()}).Debug("listJobs complete")
 	return jobs, nil
 }
@@ -81,7 +126,7 @@ func (g *gcsClient) listRuns(ctx context.Context, job string) ([]string, error) 
 		Delimiter: "/",
 	}
 
-	g.incCalls()
+	t0 := time.Now()
 	var runs []string
 	it := bucket.Objects(ctx, query)
 	for {
@@ -100,6 +145,7 @@ func (g *gcsClient) listRuns(ctx context.Context, job string) ([]string, error) 
 			}
 		}
 	}
+	g.logCall("listRuns", prefix, time.Since(t0))
 	logrus.WithFields(logrus.Fields{"job": job, "runs": len(runs), "api_calls": g.CallCount()}).Debug("listRuns complete")
 	return runs, nil
 }
@@ -170,7 +216,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		ignoreSet[d] = true
 	}
 
-	g.incCalls()
+	t0 := time.Now()
 	var variantDir string
 	it := bucket.Objects(ctx, query)
 	for {
@@ -190,6 +236,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 			}
 		}
 	}
+	g.logCall("listArtifacts", artifactsPrefix, time.Since(t0))
 
 	if variantDir == "" {
 		logrus.WithFields(logrus.Fields{"job": job, "run": runID, "api_calls": g.CallCount()}).Debug("listSteps: no variant found")
@@ -200,7 +247,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 	stepsPrefix := artifactsPrefix + variantDir + "/"
 	query = &storage.Query{Prefix: stepsPrefix}
 
-	g.incCalls()
+	t1 := time.Now()
 	steps := make(map[string]StepResult)
 	stepDirs := make(map[string][]string)
 	noRecurseSet := make(map[string]bool)
@@ -263,6 +310,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 			}
 		}
 	}
+	g.logCall("listSteps", stepsPrefix, time.Since(t1))
 
 	// Read finished.json files concurrently to get step results
 	type stepResultPair struct {
@@ -304,15 +352,17 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 
 // readFinishedJSON reads a finished.json object and returns the step result.
 func (g *gcsClient) readFinishedJSON(ctx context.Context, objectName string) StepResult {
-	g.incCalls()
+	t0 := time.Now()
 	reader, err := g.client.Bucket(g.cfg.Bucket).Object(objectName).NewReader(ctx)
 	if err != nil {
+		g.logCall("readFinished:err", objectName, time.Since(t0))
 		logrus.WithError(err).WithField("object", objectName).Debug("failed to read finished.json")
 		return StepUnknown
 	}
 	defer reader.Close()
 
 	data, err := io.ReadAll(reader)
+	g.logCall("readFinished", objectName, time.Since(t0))
 	if err != nil {
 		return StepUnknown
 	}
@@ -342,7 +392,7 @@ func (g *gcsClient) listImmediateChildren(ctx context.Context, prefix string) ([
 		Delimiter: "/",
 	}
 
-	g.incCalls()
+	t0 := time.Now()
 	var children []string
 	it := bucket.Objects(ctx, query)
 	for {
@@ -362,5 +412,6 @@ func (g *gcsClient) listImmediateChildren(ctx context.Context, prefix string) ([
 			children = append(children, name)
 		}
 	}
+	g.logCall("listChildren", prefix, time.Since(t0))
 	return children, nil
 }

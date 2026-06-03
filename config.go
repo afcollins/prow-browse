@@ -9,17 +9,17 @@ import (
 const appName = "prow-status"
 
 type Config struct {
-	Bucket            string   `json:"bucket"`
-	Prefix            string   `json:"prefix"`
-	JobPattern        string   `json:"job_pattern"`
-	NoRecurseSteps    []string `json:"no_recurse_steps"`
-	OptionalSteps     []string `json:"optional_steps"`
+	Bucket             string   `json:"bucket"`
+	Prefix             string   `json:"prefix"`
+	JobPattern         string   `json:"job_pattern"`
+	NoRecurseSteps     []string `json:"no_recurse_steps"`
+	OptionalSteps      []string `json:"optional_steps"`
 	IgnoreArtifactDirs []string `json:"ignore_artifact_dirs"`
-	StepOrder         []string `json:"step_order"`
-	EmojiPalette      string   `json:"emoji_palette"`
-	MaxRunsPerJob     int      `json:"max_runs_per_job"`
-	Concurrency       int      `json:"concurrency"`
-	ColumnsPerPage    int      `json:"columns_per_page"`
+	StepOrder          []string `json:"step_order"`
+	EmojiPalette       string   `json:"emoji_palette"`
+	MaxRunsPerJob      int      `json:"max_runs_per_job"`
+	Concurrency        int      `json:"concurrency"`
+	ColumnsPerPage     int      `json:"columns_per_page"`
 }
 
 // defaultConfigPath returns the config path, checking ./config.json first,
@@ -37,14 +37,17 @@ func defaultConfigPath() string {
 	return filepath.Join(dir, appName, "config.json")
 }
 
-// defaultDBPath returns ~/.local/share/prow-status/prow-status.db.
-func defaultDBPath() string {
+func defaultDataDir() string {
 	dir := os.Getenv("XDG_DATA_HOME")
 	if dir == "" {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(dir, appName, appName+".db")
+	return filepath.Join(dir, appName)
+}
+
+func defaultDBPath() string {
+	return filepath.Join(defaultDataDir(), appName+".db")
 }
 
 func loadConfig(path string) (*Config, error) {

@@ -19,7 +19,7 @@ make build && make test
 Single-binary Go CLI using cobra subcommands, all source in the root package:
 
 - `main.go` - Entry point, cobra commands: root (local display), `fetch` (discovery), `pull` (artifact traversal)
-- `gcs.go` - GCS operations: recursive listing + concurrent `finished.json` reads, atomic API call counter
+- `gcs.go` - GCS operations: recursive listing + concurrent `finished.json` reads, slog-based call logging to `~/.local/share/prow-status/gcs.log`
 - `db.go` - SQLite storage (modernc.org/sqlite). Steps table stores result (SUCCESS/FAILURE/UNKNOWN). Schema auto-migrates.
 - `display.go` - Grid orchestration, platform/job-type classification, ANSI raw renderer
 - `display_table.go` - Lipgloss v2 table renderer (`-t` flag)
@@ -32,7 +32,7 @@ Single-binary Go CLI using cobra subcommands, all source in the root package:
 - `pull -n N` skips runs already pulled; explicit run IDs always force re-pull
 - GCS fallback: `pull <id>` searches all jobs if ID not in local DB
 - Go GCS SDK with semaphore-controlled concurrency (`cfg.Concurrency`)
-- SQLite for offline querying; logrus logging to stderr (`-v` for debug)
+- SQLite for offline querying; logrus logging to stderr (`-v` for debug); slog file logging for GCS calls
 - Two-level platform grouping (`-g`): job type (loaded-upgrade, metal) then platform (AWS, ROSA, vSphere, etc.)
 - Job classification by job name keywords; step filtering by earliest-keyword-wins
 - Metal sub-groups: daily-virt, weekly-telco-core-cpt, weekly-eip, weekly, udn-bgp

@@ -8,12 +8,12 @@ import (
 )
 
 const (
-	colorReset  = "\033[0m"
-	colorGreen  = "\033[32m"
-	colorRed    = "\033[31m"
-	colorCyan   = "\033[36m"
-	colorDim    = "\033[2m"
-	colorBold   = "\033[1m"
+	colorReset = "\033[0m"
+	colorGreen = "\033[32m"
+	colorRed   = "\033[31m"
+	colorCyan  = "\033[36m"
+	colorDim   = "\033[2m"
+	colorBold  = "\033[1m"
 )
 
 // Emoji palettes for column headers. Each emoji is 2 terminal columns wide.

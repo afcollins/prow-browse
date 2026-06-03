@@ -10,7 +10,9 @@ A CLI tool that provides a single-pane view of OpenShift CI (Prow) periodic job 
 - Platform grouping (`-g`): separates AWS, ROSA, ROSA HCP, vSphere, Metal, etc.
 - Two-level grouping for loaded-upgrade and metal jobs (by platform/sub-config)
 - Steps ordered by CI execution sequence; gather steps pushed to bottom
+- GCS web URLs in legend (`-u`) for quick access to run artifacts
 - Concurrent GCS API calls with progress logging and call counter (`-v`)
+- GCS call logging to `~/.local/share/prow-status/gcs.log` with per-call timing
 
 ## Usage
 
@@ -32,6 +34,7 @@ make test
 # Display from local database
 ./prow-status -j "aws-4.22" -n 5
 ./prow-status -g -t                      # group by platform, table rendering
+./prow-status -j "aws" -n 3 -u           # show gcsweb URLs in legend
 
 # Database introspection
 ./prow-status --stats
@@ -39,6 +42,9 @@ make test
 
 # Debug logging
 ./prow-status fetch -v
+
+# GCS call log (written automatically on any GCS operation)
+cat ~/.local/share/prow-status/gcs.log
 ```
 
 ## Configuration

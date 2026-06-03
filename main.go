@@ -90,7 +90,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Config file path")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "", "SQLite database path")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
-	rootCmd.Flags().StringP("jobs", "j",  "", "Filter job names by substring")
+	rootCmd.Flags().StringP("jobs", "j", "", "Filter job names by substring")
 	rootCmd.Flags().IntP("number", "n", 0, "Max runs to display, most recent first (0 = all)")
 	rootCmd.Flags().Bool("stats", false, "Show database statistics")
 	rootCmd.Flags().String("query", "", "Run a SQL query against the local database")
