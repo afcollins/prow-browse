@@ -383,4 +383,3 @@ func (g *gcsClient) readFinishedJSON(ctx context.Context, objectName string) Ste
 		return StepUnknown
 	}
 }
-
