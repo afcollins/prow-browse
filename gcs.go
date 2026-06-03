@@ -79,9 +79,9 @@ func (g *gcsClient) close() {
 		}).Info("gcs_session_end")
 	}
 	if g.logFile != nil {
-		g.logFile.Close()
+		_ = g.logFile.Close()
 	}
-	g.client.Close()
+	_ = g.client.Close()
 }
 
 // listJobs returns job directory names matching the configured pattern.
@@ -359,7 +359,7 @@ func (g *gcsClient) readFinishedJSON(ctx context.Context, objectName string) Ste
 		logrus.WithError(err).WithField("object", objectName).Debug("failed to read finished.json")
 		return StepUnknown
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	data, err := io.ReadAll(reader)
 	g.logCall("readFinished", objectName, time.Since(t0))
@@ -384,34 +384,3 @@ func (g *gcsClient) readFinishedJSON(ctx context.Context, objectName string) Ste
 	}
 }
 
-// listImmediateChildren lists files and directories at the given prefix (one level).
-func (g *gcsClient) listImmediateChildren(ctx context.Context, prefix string) ([]string, error) {
-	bucket := g.client.Bucket(g.cfg.Bucket)
-	query := &storage.Query{
-		Prefix:    prefix,
-		Delimiter: "/",
-	}
-
-	t0 := time.Now()
-	var children []string
-	it := bucket.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		if attrs.Prefix != "" {
-			name := strings.TrimPrefix(attrs.Prefix, prefix)
-			name = strings.TrimSuffix(name, "/")
-			children = append(children, name+"/")
-		} else if attrs.Name != "" {
-			name := strings.TrimPrefix(attrs.Name, prefix)
-			children = append(children, name)
-		}
-	}
-	g.logCall("listChildren", prefix, time.Since(t0))
-	return children, nil
-}

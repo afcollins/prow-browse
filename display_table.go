@@ -13,7 +13,6 @@ var (
 	styleRed    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	styleDim    = lipgloss.NewStyle().Faint(true)
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	styleStep   = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
 )
 
 func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
@@ -132,9 +131,7 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 
 	// Convert rows to [][]string for table.Rows
 	rowSlices := make([][]string, len(rows))
-	for i, r := range rows {
-		rowSlices[i] = r
-	}
+	copy(rowSlices, rows)
 
 	// Build border style
 	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))

@@ -19,7 +19,7 @@ func openDB(path string) (*DB, error) {
 	}
 
 	if err := initSchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("initializing schema: %w", err)
 	}
 
@@ -76,37 +76,37 @@ func (d *DB) StoreResults(results []RunResult) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	runStmt, err := tx.Prepare(`INSERT OR REPLACE INTO runs (job, run_id, variant) VALUES (?, ?, ?)`)
 	if err != nil {
 		return err
 	}
-	defer runStmt.Close()
+	defer func() { _ = runStmt.Close() }()
 
 	stepStmt, err := tx.Prepare(`INSERT OR REPLACE INTO steps (job, run_id, step_name, result) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
-	defer stepStmt.Close()
+	defer func() { _ = stepStmt.Close() }()
 
 	childStmt, err := tx.Prepare(`INSERT OR REPLACE INTO step_children (job, run_id, step_name, child_name) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
-	defer childStmt.Close()
+	defer func() { _ = childStmt.Close() }()
 
 	delChildStmt, err := tx.Prepare(`DELETE FROM step_children WHERE job = ? AND run_id = ?`)
 	if err != nil {
 		return err
 	}
-	defer delChildStmt.Close()
+	defer func() { _ = delChildStmt.Close() }()
 
 	delStepStmt, err := tx.Prepare(`DELETE FROM steps WHERE job = ? AND run_id = ?`)
 	if err != nil {
 		return err
 	}
-	defer delStepStmt.Close()
+	defer func() { _ = delStepStmt.Close() }()
 
 	for _, r := range results {
 		// Clear old steps/children so re-fetch replaces stale data
@@ -142,7 +142,7 @@ func (d *DB) SeenRuns(job string) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	seen := make(map[string]bool)
 	for rows.Next() {
@@ -175,7 +175,7 @@ func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var allRuns []runInfo
 	for rows.Next() {
@@ -212,7 +212,7 @@ func (d *DB) QueryResultsByRunIDs(runIDs []string) ([]RunResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var allRuns []runInfo
 	for rows.Next() {
@@ -251,12 +251,12 @@ func (d *DB) loadRunDetails(allRuns []runInfo) ([]RunResult, error) {
 			var name string
 			var result int
 			if err := stepRows.Scan(&name, &result); err != nil {
-				stepRows.Close()
+				_ = stepRows.Close()
 				return nil, err
 			}
 			r.Steps[name] = StepResult(result)
 		}
-		stepRows.Close()
+		_ = stepRows.Close()
 
 		childRows, err := d.db.Query(
 			`SELECT step_name, child_name FROM step_children WHERE job = ? AND run_id = ?`,
@@ -267,12 +267,12 @@ func (d *DB) loadRunDetails(allRuns []runInfo) ([]RunResult, error) {
 		for childRows.Next() {
 			var stepName, childName string
 			if err := childRows.Scan(&stepName, &childName); err != nil {
-				childRows.Close()
+				_ = childRows.Close()
 				return nil, err
 			}
 			r.StepDirs[stepName] = append(r.StepDirs[stepName], childName)
 		}
-		childRows.Close()
+		_ = childRows.Close()
 
 		r.Pulled = len(r.Steps) > 0
 		results = append(results, r)
@@ -288,7 +288,7 @@ func (d *DB) ResolveRunID(suffix string) (job, runID string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var matches []struct{ job, runID string }
 	for rows.Next() {
@@ -330,7 +330,7 @@ func (d *DB) ListJobs(jobFilter string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var jobs []string
 	for rows.Next() {
@@ -363,13 +363,13 @@ func (d *DB) StoreRuns(results []RunResult) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO runs (job, run_id, variant) VALUES (?, ?, ?)`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, r := range results {
 		if _, err := stmt.Exec(r.Job, r.RunID, r.VariantID); err != nil {
@@ -403,7 +403,7 @@ func (d *DB) QueryRunsWithoutSteps(jobFilter string, limit int) ([]RunResult, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []RunResult
 	for rows.Next() {
@@ -428,7 +428,7 @@ func (d *DB) RunSQL(query string) ([][]string, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	cols, err := rows.Columns()
 	if err != nil {

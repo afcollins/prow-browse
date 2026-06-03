@@ -10,7 +10,9 @@ func TestLoadConfig(t *testing.T) {
 	t.Run("defaults applied", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "config.json")
-		os.WriteFile(path, []byte(`{"bucket":"test-bucket"}`), 0644)
+		if err := os.WriteFile(path, []byte(`{"bucket":"test-bucket"}`), 0644); err != nil {
+			t.Fatal(err)
+		}
 
 		cfg, err := loadConfig(path)
 		if err != nil {
@@ -33,7 +35,9 @@ func TestLoadConfig(t *testing.T) {
 	t.Run("explicit values override defaults", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "config.json")
-		os.WriteFile(path, []byte(`{"bucket":"b","max_runs_per_job":10,"concurrency":5,"columns_per_page":25}`), 0644)
+		if err := os.WriteFile(path, []byte(`{"bucket":"b","max_runs_per_job":10,"concurrency":5,"columns_per_page":25}`), 0644); err != nil {
+			t.Fatal(err)
+		}
 
 		cfg, err := loadConfig(path)
 		if err != nil {
@@ -60,7 +64,9 @@ func TestLoadConfig(t *testing.T) {
 	t.Run("invalid JSON", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "config.json")
-		os.WriteFile(path, []byte(`{invalid`), 0644)
+		if err := os.WriteFile(path, []byte(`{invalid`), 0644); err != nil {
+			t.Fatal(err)
+		}
 
 		_, err := loadConfig(path)
 		if err == nil {

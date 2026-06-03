@@ -53,7 +53,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			if statsFlag, _ := cmd.Flags().GetBool("stats"); statsFlag {
 				printStats(db)
@@ -106,7 +106,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			jobFilter, _ := cmd.Flags().GetString("jobs")
 			showAll, _ := cmd.Flags().GetBool("all")
@@ -128,7 +128,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			jobFilter, _ := cmd.Flags().GetString("jobs")
 			numRuns, _ := cmd.Flags().GetInt("number")
