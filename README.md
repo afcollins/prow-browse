@@ -11,6 +11,8 @@ A CLI tool that provides a single-pane view of OpenShift CI (Prow) periodic job 
 - Two-level grouping for loaded-upgrade and metal jobs (by platform/sub-config)
 - Steps ordered by CI execution sequence; gather steps pushed to bottom
 - GCS web URLs in legend (`-u`) for quick access to run artifacts
+- Interactive artifact browser (`browse`) with bubbletea TUI — lazy GCS expansion, search, batch download
+- Browse arbitrary GCS paths (`browse --path`) — supports PR logs, gcsweb URLs, gs:// URLs
 - Concurrent GCS API calls with progress logging and call counter (`-v`)
 - GCS call logging to `~/.local/share/prow-status/gcs.log` with per-call timing
 
@@ -40,12 +42,35 @@ make test
 ./prow-status --stats
 ./prow-status --query "SELECT job, count(*) FROM runs GROUP BY job"
 
+# Interactive artifact browser
+./prow-status browse 9408512             # browse by run ID (auto-pulls if needed)
+./prow-status browse -p pr-logs/pull/... # browse arbitrary GCS path
+./prow-status browse -p https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/...
+
 # Debug logging
 ./prow-status fetch -v
 
 # GCS call log (written automatically on any GCS operation)
 cat ~/.local/share/prow-status/gcs.log
 ```
+
+### Browse keys
+
+| Key | Action |
+|-----|--------|
+| ↑/↓, j/k | Navigate |
+| →/Enter | Expand directory (lazy GCS listing) |
+| ← | Collapse directory (or jump to parent) |
+| Space | Toggle file checkbox |
+| / | Search by name |
+| n/N | Next/previous search match |
+| d | Download checked files |
+| PgUp/PgDn | Scroll page |
+| g/G | Jump to top/bottom |
+| Ctrl+Z | Suspend to shell (`fg` to resume) |
+| q/Esc | Quit |
+
+Files download to `~/Downloads/prow/` mirroring the full GCS bucket path. Already-downloaded files are skipped on subsequent downloads. Override with `-o`/`--output`.
 
 ## Configuration
 
@@ -63,6 +88,7 @@ Edit `config.json`:
 | `columns_per_page` | Max columns before paginating (default: 50) |
 | `max_runs_per_job` | Default max runs for `pull` when `-n` not specified |
 | `concurrency` | Max parallel GCS API calls |
+| `download_dir` | Default download directory for `browse` (default: `~/Downloads/prow`) |
 
 ## Grid output
 
