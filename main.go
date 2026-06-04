@@ -148,9 +148,9 @@ func main() {
 	pullCmd.Flags().BoolP("urls", "u", false, "Show GCS web URLs for each run")
 
 	browseCmd := &cobra.Command{
-		Use:   "browse <run-id-suffix>",
-		Short: "Interactively browse and download artifacts for a run",
-		Args:  cobra.ExactArgs(1),
+		Use:   "browse [run-id-suffix]",
+		Short: "Interactively browse and download artifacts for a run or GCS path",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, db, err := openConfigAndDB(configPath, dbPath)
 			if err != nil {
@@ -163,10 +163,22 @@ func main() {
 				outputDir = cfg.DownloadDir
 			}
 
+			gcsPath, _ := cmd.Flags().GetString("path")
+			if gcsPath != "" && len(args) > 0 {
+				return fmt.Errorf("specify either a run ID or --path, not both")
+			}
+			if gcsPath == "" && len(args) == 0 {
+				return fmt.Errorf("specify a run ID suffix or --path")
+			}
+
+			if gcsPath != "" {
+				return runBrowsePath(cfg, gcsPath, outputDir)
+			}
 			return runBrowse(db, cfg, args[0], outputDir)
 		},
 	}
 	browseCmd.Flags().StringP("output", "o", "", "Download directory (default ~/Downloads/prow)")
+	browseCmd.Flags().StringP("path", "p", "", "Browse arbitrary GCS path (accepts gs://, gcsweb URL, or bucket-relative)")
 
 	rootCmd.AddCommand(fetchCmd, pullCmd, browseCmd)
 
@@ -574,6 +586,43 @@ func runBrowse(db *DB, cfg *Config, suffix, outputDir string) error {
 	p := tea.NewProgram(model)
 	_, err = p.Run()
 	return err
+}
+
+func runBrowsePath(cfg *Config, rawPath, outputDir string) error {
+	ctx := context.Background()
+
+	gcsPath := normalizeGCSPath(rawPath, cfg.Bucket)
+
+	client, err := newGCSClient(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create GCS client: %w", err)
+	}
+	defer client.close()
+
+	model, err := newBrowseModelFromPath(client, cfg, gcsPath, outputDir)
+	if err != nil {
+		return fmt.Errorf("listing path: %w", err)
+	}
+
+	p := tea.NewProgram(model)
+	_, err = p.Run()
+	return err
+}
+
+func normalizeGCSPath(raw, bucket string) string {
+	// Strip gcsweb URL prefix
+	if after, ok := strings.CutPrefix(raw, gcsWebBaseURL); ok {
+		raw = after
+	}
+	// Strip gs:// prefix
+	if after, ok := strings.CutPrefix(raw, "gs://"); ok {
+		raw = after
+	}
+	// Strip bucket name prefix
+	if after, ok := strings.CutPrefix(raw, bucket+"/"); ok {
+		raw = after
+	}
+	return strings.TrimSuffix(raw, "/")
 }
 
 func runQuery(db *DB, query string) {

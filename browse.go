@@ -30,8 +30,8 @@ type browseModel struct {
 	width     int
 	gcs       *gcsClient
 	cfg       *Config
-	job       string
-	runID     string
+	title     string // header display text
+	gcsPrefix string // root GCS path for relative download paths
 	outputDir string
 	status    string
 	quitting  bool
@@ -52,6 +52,7 @@ type downloadDoneMsg struct {
 
 const headerLines = 2 // "Browse: ..." + blank line
 const footerLines = 2 // blank line + status
+const helpText = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  / search  d download  q quit"
 
 func newBrowseModel(gcs *gcsClient, cfg *Config, result RunResult, outputDir string) browseModel {
 	var root []*treeNode
@@ -101,14 +102,50 @@ func newBrowseModel(gcs *gcsClient, cfg *Config, result RunResult, outputDir str
 		root:      root,
 		gcs:       gcs,
 		cfg:       cfg,
-		job:       result.Job,
-		runID:     result.RunID,
+		title:     shortJobName(result.Job, cfg) + " / " + result.RunID,
+		gcsPrefix: cfg.Prefix + "/" + result.Job + "/" + result.RunID,
 		outputDir: outputDir,
 		height:    24,
-		status:    "↑/↓ navigate  →/Enter expand  ← collapse  Space check  / search  d download  q quit",
+		status:    helpText,
 	}
 	m.rebuildFlat()
 	return m
+}
+
+func newBrowseModelFromPath(gcs *gcsClient, cfg *Config, gcsPath, outputDir string) (browseModel, error) {
+	gcsPath = strings.TrimSuffix(gcsPath, "/")
+
+	entries, err := gcs.listDir(context.Background(), gcsPath)
+	if err != nil {
+		return browseModel{}, err
+	}
+
+	var root []*treeNode
+	for _, e := range entries {
+		root = append(root, &treeNode{
+			name:    e.Name,
+			gcsPath: gcsPath + "/" + e.Name,
+			isDir:   e.IsDir,
+			depth:   0,
+		})
+	}
+
+	// Use last path segment as title
+	parts := strings.Split(gcsPath, "/")
+	title := parts[len(parts)-1]
+
+	m := browseModel{
+		root:      root,
+		gcs:       gcs,
+		cfg:       cfg,
+		title:     title,
+		gcsPrefix: gcsPath,
+		outputDir: outputDir,
+		height:    24,
+		status:    helpText,
+	}
+	m.rebuildFlat()
+	return m, nil
 }
 
 func (m *browseModel) rebuildFlat() {
@@ -297,12 +334,12 @@ func (m *browseModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.searchBuf != "" {
 			m.searchNext(1)
 		} else {
-			m.status = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  / search  d download  q quit"
+			m.status = helpText
 		}
 	case "esc":
 		m.searching = false
 		m.searchBuf = ""
-		m.status = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  / search  d download  q quit"
+		m.status = helpText
 	case "backspace":
 		if len(m.searchBuf) > 0 {
 			m.searchBuf = m.searchBuf[:len(m.searchBuf)-1]
@@ -341,7 +378,7 @@ func (m browseModel) View() string {
 	}
 
 	var b strings.Builder
-	header := fmt.Sprintf(" Browse: %s / %s\n\n", shortJobName(m.job, m.cfg), m.runID)
+	header := fmt.Sprintf(" Browse: %s\n\n", m.title)
 	b.WriteString(header)
 
 	vis := m.visibleRows()
@@ -435,12 +472,10 @@ func (m browseModel) loadDir(node *treeNode) tea.Cmd {
 
 func (m browseModel) downloadFiles(files []*treeNode) tea.Cmd {
 	return func() tea.Msg {
-		shortJob := shortJobName(m.job, m.cfg)
-		shortJob = strings.TrimPrefix(shortJob, "-j ")
-		baseDir := m.outputDir + "/" + shortJob + "/" + m.runID
+		baseDir := m.outputDir
 
 		for _, f := range files {
-			relPath := strings.TrimPrefix(f.gcsPath, m.cfg.Prefix+"/"+m.job+"/"+m.runID+"/")
+			relPath := strings.TrimPrefix(f.gcsPath, m.gcsPrefix+"/")
 			localPath := baseDir + "/" + relPath
 			if err := m.gcs.downloadObject(context.Background(), f.gcsPath, localPath); err != nil {
 				return downloadDoneMsg{err: err}
