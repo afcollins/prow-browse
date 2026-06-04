@@ -31,7 +31,7 @@ type browseModel struct {
 	gcs       *gcsClient
 	cfg       *Config
 	title     string // header display text
-	gcsPrefix string // root GCS path for relative download paths
+	gcsPrefix string // root GCS path being browsed
 	outputDir string
 	status    string
 	quitting  bool
@@ -472,11 +472,8 @@ func (m browseModel) loadDir(node *treeNode) tea.Cmd {
 
 func (m browseModel) downloadFiles(files []*treeNode) tea.Cmd {
 	return func() tea.Msg {
-		baseDir := m.outputDir
-
 		for _, f := range files {
-			relPath := strings.TrimPrefix(f.gcsPath, m.gcsPrefix+"/")
-			localPath := baseDir + "/" + relPath
+			localPath := m.outputDir + "/" + f.gcsPath
 			if err := m.gcs.downloadObject(context.Background(), f.gcsPath, localPath); err != nil {
 				return downloadDoneMsg{err: err}
 			}
