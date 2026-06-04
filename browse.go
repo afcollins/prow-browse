@@ -216,6 +216,8 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "ctrl+z":
+			return m, tea.Suspend
 		case "q", "esc":
 			m.quitting = true
 			return m, tea.Quit
