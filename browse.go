@@ -34,9 +34,10 @@ type browseModel struct {
 	gcsPrefix string // root GCS path being browsed
 	outputDir string
 	status    string
-	quitting  bool
-	searching bool
-	searchBuf string
+	quitting   bool
+	searching  bool
+	searchBuf  string
+	downloaded map[string]bool
 }
 
 type listDirDoneMsg struct {
@@ -46,8 +47,10 @@ type listDirDoneMsg struct {
 }
 
 type downloadDoneMsg struct {
-	count int
-	err   error
+	count   int
+	skipped int
+	paths   []string
+	err     error
 }
 
 const headerLines = 2 // "Browse: ..." + blank line
@@ -99,14 +102,15 @@ func newBrowseModel(gcs *gcsClient, cfg *Config, result RunResult, outputDir str
 	}
 
 	m := browseModel{
-		root:      root,
-		gcs:       gcs,
-		cfg:       cfg,
-		title:     shortJobName(result.Job, cfg) + " / " + result.RunID,
-		gcsPrefix: cfg.Prefix + "/" + result.Job + "/" + result.RunID,
-		outputDir: outputDir,
-		height:    24,
-		status:    helpText,
+		root:       root,
+		gcs:        gcs,
+		cfg:        cfg,
+		title:      shortJobName(result.Job, cfg) + " / " + result.RunID,
+		gcsPrefix:  cfg.Prefix + "/" + result.Job + "/" + result.RunID,
+		outputDir:  outputDir,
+		height:     24,
+		status:     helpText,
+		downloaded: make(map[string]bool),
 	}
 	m.rebuildFlat()
 	return m
@@ -135,12 +139,13 @@ func newBrowseModelFromPath(gcs *gcsClient, cfg *Config, gcsPath, outputDir stri
 	title := parts[len(parts)-1]
 
 	m := browseModel{
-		root:      root,
-		gcs:       gcs,
-		cfg:       cfg,
-		title:     title,
-		gcsPrefix: gcsPath,
-		outputDir: outputDir,
+		root:       root,
+		gcs:        gcs,
+		cfg:        cfg,
+		title:      title,
+		gcsPrefix:  gcsPath,
+		outputDir:  outputDir,
+		downloaded: make(map[string]bool),
 		height:    24,
 		status:    helpText,
 	}
@@ -317,8 +322,15 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("loaded %d entries in %s/", len(msg.entries), msg.node.name)
 
 	case downloadDoneMsg:
+		for _, p := range msg.paths {
+			m.downloaded[p] = true
+		}
 		if msg.err != nil {
 			m.status = "download error: " + msg.err.Error()
+		} else if msg.count == 0 && msg.skipped > 0 {
+			m.status = fmt.Sprintf("all %d files already downloaded", msg.skipped)
+		} else if msg.skipped > 0 {
+			m.status = fmt.Sprintf("downloaded %d files (%d already downloaded)", msg.count, msg.skipped)
 		} else {
 			m.status = fmt.Sprintf("downloaded %d files to %s", msg.count, m.outputDir)
 		}
@@ -470,14 +482,33 @@ func (m browseModel) loadDir(node *treeNode) tea.Cmd {
 	}
 }
 
+func filterDownloaded(files []*treeNode, downloaded map[string]bool) (toDownload, skipped []*treeNode) {
+	for _, f := range files {
+		if downloaded[f.gcsPath] {
+			skipped = append(skipped, f)
+		} else {
+			toDownload = append(toDownload, f)
+		}
+	}
+	return toDownload, skipped
+}
+
 func (m browseModel) downloadFiles(files []*treeNode) tea.Cmd {
+	toDownload, skipped := filterDownloaded(files, m.downloaded)
+	if len(toDownload) == 0 {
+		return func() tea.Msg {
+			return downloadDoneMsg{skipped: len(skipped)}
+		}
+	}
 	return func() tea.Msg {
-		for _, f := range files {
+		var paths []string
+		for _, f := range toDownload {
 			localPath := m.outputDir + "/" + f.gcsPath
 			if err := m.gcs.downloadObject(context.Background(), f.gcsPath, localPath); err != nil {
-				return downloadDoneMsg{err: err}
+				return downloadDoneMsg{count: len(paths), paths: paths, skipped: len(skipped), err: err}
 			}
+			paths = append(paths, f.gcsPath)
 		}
-		return downloadDoneMsg{count: len(files)}
+		return downloadDoneMsg{count: len(paths), paths: paths, skipped: len(skipped)}
 	}
 }
