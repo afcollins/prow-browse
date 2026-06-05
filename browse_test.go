@@ -8,11 +8,11 @@ func TestFilterDownloaded(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		files         []*treeNode
-		downloaded    map[string]bool
-		wantDownload  int
-		wantSkipped   int
+		name         string
+		files        []*treeNode
+		downloaded   map[string]bool
+		wantDownload int
+		wantSkipped  int
 	}{
 		{
 			name:         "all new",

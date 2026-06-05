@@ -22,18 +22,18 @@ type treeNode struct {
 }
 
 type browseModel struct {
-	root      []*treeNode
-	flat      []*treeNode
-	cursor    int
-	offset    int // viewport scroll offset
-	height    int // terminal height
-	width     int
-	gcs       *gcsClient
-	cfg       *Config
-	title     string // header display text
-	gcsPrefix string // root GCS path being browsed
-	outputDir string
-	status    string
+	root       []*treeNode
+	flat       []*treeNode
+	cursor     int
+	offset     int // viewport scroll offset
+	height     int // terminal height
+	width      int
+	gcs        *gcsClient
+	cfg        *Config
+	title      string // header display text
+	gcsPrefix  string // root GCS path being browsed
+	outputDir  string
+	status     string
 	quitting   bool
 	searching  bool
 	searchBuf  string
@@ -146,8 +146,8 @@ func newBrowseModelFromPath(gcs *gcsClient, cfg *Config, gcsPath, outputDir stri
 		gcsPrefix:  gcsPath,
 		outputDir:  outputDir,
 		downloaded: make(map[string]bool),
-		height:    24,
-		status:    helpText,
+		height:     24,
+		status:     helpText,
 	}
 	m.rebuildFlat()
 	return m, nil
