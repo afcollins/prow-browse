@@ -16,6 +16,8 @@ import (
 )
 
 // StepResult represents the outcome of a single step.
+var version = "dev"
+
 type StepResult int
 
 const (
@@ -180,7 +182,15 @@ func main() {
 	browseCmd.Flags().StringP("output", "o", "", "Download directory (default ~/Downloads/prow)")
 	browseCmd.Flags().StringP("path", "p", "", "Browse arbitrary GCS path (accepts gs://, gcsweb URL, or bucket-relative)")
 
-	rootCmd.AddCommand(fetchCmd, pullCmd, browseCmd)
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print the build revision",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println(version)
+		},
+	}
+
+	rootCmd.AddCommand(fetchCmd, pullCmd, browseCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

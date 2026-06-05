@@ -1,5 +1,6 @@
 BINARY  := prow-status
-LDFLAGS := -s -w
+VERSION := $(shell git rev-parse --short HEAD)
+LDFLAGS := -s -w -X main.version=$(VERSION)
 PREFIX  := $(HOME)/.local
 
 .PHONY: build test lint fmt clean install
