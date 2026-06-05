@@ -16,7 +16,9 @@ import (
 )
 
 // StepResult represents the outcome of a single step.
-var version = "dev"
+var Version = "dev"
+var BuildDate = ""
+var GitCommit = ""
 
 type StepResult int
 
@@ -186,7 +188,9 @@ func main() {
 		Use:   "version",
 		Short: "Print the build revision",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(version)
+			fmt.Println("Version:", Version)
+			fmt.Println("Git Commit:", GitCommit)
+			fmt.Println("Build Date:", BuildDate)
 		},
 	}
 

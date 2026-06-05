@@ -1,6 +1,7 @@
 BINARY  := prow-status
+BUILD_DATE = $(shell date '+%Y-%m-%d-%H:%M:%S')
 VERSION := $(shell git rev-parse --short HEAD)
-LDFLAGS := -s -w -X main.version=$(VERSION)
+LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.BuildDate=$(BUILD_DATE) -X main.GitCommit=$(VERSION)
 PREFIX  := $(HOME)/.local
 
 .PHONY: build test lint fmt clean install
