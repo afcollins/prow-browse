@@ -624,6 +624,10 @@ func runBrowsePath(cfg *Config, rawPath, outputDir string) error {
 }
 
 func normalizeGCSPath(raw, bucket string) string {
+	// Strip prow URL prefix (e.g. https://prow.ci.openshift.org/view/gs/BUCKET/...)
+	if after, found := strings.CutPrefix(raw, "https://prow.ci.openshift.org/view/gs/"); found {
+		raw = after
+	}
 	// Strip gcsweb URL prefix
 	if after, ok := strings.CutPrefix(raw, gcsWebBaseURL); ok {
 		raw = after
