@@ -17,6 +17,22 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+type objectIterator interface {
+	Next() (*storage.ObjectAttrs, error)
+}
+
+type bucketLister interface {
+	Objects(ctx context.Context, q *storage.Query) objectIterator
+}
+
+type gcsBucketHandle struct {
+	bkt *storage.BucketHandle
+}
+
+func (h *gcsBucketHandle) Objects(ctx context.Context, q *storage.Query) objectIterator {
+	return h.bkt.Objects(ctx, q)
+}
+
 type gcsClient struct {
 	client    *storage.Client
 	cfg       *Config
@@ -26,15 +42,19 @@ type gcsClient struct {
 	startTime time.Time
 }
 
+func (g *gcsClient) bucket() bucketLister {
+	return &gcsBucketHandle{bkt: g.client.Bucket(g.cfg.Bucket)}
+}
+
+func (g *gcsClient) logTrace(msg string, fields logrus.Fields) {
+	if g.fileLog != nil {
+		g.fileLog.WithFields(fields).Trace(msg)
+	}
+}
+
 func (g *gcsClient) logCall(op, path string, d time.Duration) {
 	atomic.AddInt64(&g.apiCalls, 1)
-	if g.fileLog != nil {
-		g.fileLog.WithFields(logrus.Fields{
-			"op":   op,
-			"path": path,
-			"ms":   d.Milliseconds(),
-		}).Trace("gcs_call")
-	}
+	g.logTrace("gcs_call", logrus.Fields{"op": op, "path": path, "ms": d.Milliseconds()})
 }
 
 func (g *gcsClient) CallCount() int64 {
@@ -204,8 +224,6 @@ func (g *gcsClient) findRunByID(ctx context.Context, suffix string) (string, str
 func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[string]StepResult, map[string][]string, string, error) {
 	// First, find the variant directory under artifacts/
 	artifactsPrefix := g.cfg.Prefix + "/" + job + "/" + runID + "/artifacts/"
-	bucket := g.client.Bucket(g.cfg.Bucket)
-
 	query := &storage.Query{
 		Prefix:    artifactsPrefix,
 		Delimiter: "/",
@@ -216,6 +234,7 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		ignoreSet[d] = true
 	}
 
+	bucket := g.bucket()
 	t0 := time.Now()
 	var variantDir string
 	it := bucket.Objects(ctx, query)
@@ -227,11 +246,20 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("listing artifacts for %s/%s: %w", job, runID, err)
 		}
+		name := attrs.Prefix
+		if name == "" {
+			name = attrs.Name
+		}
+		g.logTrace("listArtifacts: iterating", logrus.Fields{"entry": name, "ms": time.Since(t0).Milliseconds()})
 		if attrs.Prefix != "" {
 			dirName := strings.TrimPrefix(attrs.Prefix, artifactsPrefix)
 			dirName = strings.TrimSuffix(dirName, "/")
-			if !ignoreSet[dirName] {
+			elapsed := time.Since(t0)
+			if ignoreSet[dirName] {
+				g.logTrace("listArtifacts: skipping excluded dir", logrus.Fields{"dir": dirName, "ms": elapsed.Milliseconds()})
+			} else {
 				variantDir = dirName
+				g.logTrace("listArtifacts: selected variant", logrus.Fields{"dir": dirName, "ms": elapsed.Milliseconds()})
 				break
 			}
 		}
@@ -243,74 +271,11 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		return make(map[string]StepResult), make(map[string][]string), "", nil
 	}
 
-	// Recursive list of all objects under variant (no delimiter)
 	stepsPrefix := artifactsPrefix + variantDir + "/"
-	query = &storage.Query{Prefix: stepsPrefix}
-
-	t1 := time.Now()
-	steps := make(map[string]StepResult)
-	stepDirs := make(map[string][]string)
-	noRecurseSet := make(map[string]bool)
-	for _, s := range g.cfg.NoRecurseSteps {
-		noRecurseSet[s] = true
+	steps, stepDirs, finishedPaths, err := g.scanStepObjects(ctx, stepsPrefix)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("scanning steps for %s/%s: %w", job, runID, err)
 	}
-
-	// Track which steps have finished.json and collect no-recurse children
-	var finishedPaths []string
-
-	it = bucket.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("listing steps for %s/%s: %w", job, runID, err)
-		}
-
-		relPath := strings.TrimPrefix(attrs.Name, stepsPrefix)
-		if relPath == "" {
-			continue
-		}
-
-		parts := strings.SplitN(relPath, "/", 2)
-		stepName := parts[0]
-
-		// Register step if not seen yet
-		if _, exists := steps[stepName]; !exists {
-			steps[stepName] = StepUnknown
-		}
-
-		if len(parts) == 2 {
-			subPath := parts[1]
-
-			// Track finished.json for reading
-			if subPath == "finished.json" {
-				finishedPaths = append(finishedPaths, attrs.Name)
-			}
-
-			// Collect no-recurse step children (immediate level only)
-			if noRecurseSet[stepName] {
-				childParts := strings.SplitN(subPath, "/", 2)
-				childName := childParts[0]
-				if len(childParts) == 2 {
-					childName += "/"
-				}
-				// Deduplicate children
-				found := false
-				for _, c := range stepDirs[stepName] {
-					if c == childName {
-						found = true
-						break
-					}
-				}
-				if !found {
-					stepDirs[stepName] = append(stepDirs[stepName], childName)
-				}
-			}
-		}
-	}
-	g.logCall("listSteps", stepsPrefix, time.Since(t1))
 
 	// Read finished.json files concurrently to get step results
 	type stepResultPair struct {
@@ -348,6 +313,119 @@ func (g *gcsClient) listSteps(ctx context.Context, job, runID string) (map[strin
 		"steps": len(steps), "no_recurse": len(stepDirs), "api_calls": g.CallCount(),
 	}).Debug("listSteps complete")
 	return steps, stepDirs, variantDir, nil
+}
+
+// scanStepObjects discovers step names and no-recurse children using delimiter-based
+// GCS listing, avoiding a full recursive object enumeration.
+func (g *gcsClient) scanStepObjects(ctx context.Context, stepsPrefix string) (
+	map[string]StepResult, map[string][]string, []string, error,
+) {
+	return g.scanStepObjectsWithBucket(ctx, g.bucket(), stepsPrefix)
+}
+
+func (g *gcsClient) scanStepObjectsWithBucket(ctx context.Context, bucket bucketLister, stepsPrefix string) (
+	map[string]StepResult, map[string][]string, []string, error,
+) {
+
+	t0 := time.Now()
+	query := &storage.Query{
+		Prefix:    stepsPrefix,
+		Delimiter: "/",
+	}
+
+	steps := make(map[string]StepResult)
+	var stepNames []string
+	it := bucket.Objects(ctx, query)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("listing steps under %s: %w", stepsPrefix, err)
+		}
+		if attrs.Prefix == "" {
+			continue
+		}
+		stepName := strings.TrimPrefix(attrs.Prefix, stepsPrefix)
+		stepName = strings.TrimSuffix(stepName, "/")
+		steps[stepName] = StepUnknown
+		stepNames = append(stepNames, stepName)
+	}
+	g.logTrace("scanStepObjects: listed steps", logrus.Fields{
+		"steps": len(stepNames), "ms": time.Since(t0).Milliseconds(),
+	})
+	g.logCall("scanSteps", stepsPrefix, time.Since(t0))
+
+	noRecurseSet := make(map[string]bool)
+	for _, s := range g.cfg.NoRecurseSteps {
+		noRecurseSet[s] = true
+	}
+
+	finishedPaths := make([]string, 0, len(stepNames))
+	for _, name := range stepNames {
+		finishedPaths = append(finishedPaths, stepsPrefix+name+"/finished.json")
+	}
+
+	stepDirs := make(map[string][]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, g.cfg.Concurrency)
+
+	for _, name := range stepNames {
+		if !noRecurseSet[name] {
+			continue
+		}
+		wg.Add(1)
+		go func(stepName string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			children := g.listStepChildrenWithBucket(ctx, bucket, stepsPrefix+stepName+"/")
+			mu.Lock()
+			stepDirs[stepName] = children
+			mu.Unlock()
+		}(name)
+	}
+	wg.Wait()
+
+	return steps, stepDirs, finishedPaths, nil
+}
+
+// listStepChildren returns immediate children of a step directory via delimiter-based listing.
+func (g *gcsClient) listStepChildren(ctx context.Context, prefix string) []string {
+	return g.listStepChildrenWithBucket(ctx, g.bucket(), prefix)
+}
+
+func (g *gcsClient) listStepChildrenWithBucket(ctx context.Context, bucket bucketLister, prefix string) []string {
+	t0 := time.Now()
+	query := &storage.Query{
+		Prefix:    prefix,
+		Delimiter: "/",
+	}
+	var children []string
+	it := bucket.Objects(ctx, query)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			logrus.WithError(err).WithField("prefix", prefix).Debug("failed to list step children")
+			break
+		}
+		if attrs.Prefix != "" {
+			children = append(children, strings.TrimPrefix(attrs.Prefix, prefix))
+		} else if attrs.Name != "" {
+			children = append(children, strings.TrimPrefix(attrs.Name, prefix))
+		}
+	}
+	g.logTrace("listStepChildren", logrus.Fields{
+		"prefix": prefix, "children": len(children), "ms": time.Since(t0).Milliseconds(),
+	})
+	g.logCall("listStepChildren", prefix, time.Since(t0))
+	return children
 }
 
 // readFinishedJSON reads a finished.json object and returns the step result.
