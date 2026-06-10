@@ -360,8 +360,8 @@ func (m *browseModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.status = "search: " + m.searchBuf
 	default:
-		if len(msg.String()) == 1 {
-			m.searchBuf += msg.String()
+		if len(msg.Runes) > 0 {
+			m.searchBuf += string(msg.Runes)
 		}
 		m.status = "search: " + m.searchBuf
 	}
