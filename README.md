@@ -1,4 +1,4 @@
-# prow-status
+# prow-browse
 
 A CLI tool that provides a single-pane view of OpenShift CI (Prow) periodic job results stored in GCS. It shows step results (SUCCESS/FAILURE) for each job run in a color-coded terminal grid.
 
@@ -14,7 +14,7 @@ A CLI tool that provides a single-pane view of OpenShift CI (Prow) periodic job 
 - Interactive artifact browser (`browse`) with bubbletea TUI — lazy GCS expansion, search, batch download
 - Browse arbitrary GCS paths (`browse --path`) — supports PR logs, gcsweb URLs, gs:// URLs
 - Concurrent GCS API calls with progress logging and call counter (`-v`)
-- GCS call logging to `~/.local/share/prow-status/gcs.log` with per-call timing
+- GCS call logging to `~/.local/share/prow-browse/gcs.log` with per-call timing
 
 ## Usage
 
@@ -24,34 +24,34 @@ make build
 make test
 
 # Discover run IDs from GCS (lightweight, no artifact traversal)
-./prow-status fetch
-./prow-status fetch -j "control-plane-120nodes" -n 10
-./prow-status fetch --all
+./pb fetch
+./pb fetch -j "control-plane-120nodes" -n 10
+./pb fetch --all
 
 # Pull step data (reads finished.json for each step)
-./prow-status pull -n 5                  # latest 5 unpulled runs
-./prow-status pull -n 3 -j "aws"         # latest 3 unpulled aws runs
-./prow-status pull 2038435361289408512   # force re-pull specific run (GCS fallback if not in DB)
+./pb pull -n 5                  # latest 5 unpulled runs
+./pb pull -n 3 -j "aws"         # latest 3 unpulled aws runs
+./pb pull 2038435361289408512   # force re-pull specific run (GCS fallback if not in DB)
 
 # Display from local database
-./prow-status -j "aws-4.22" -n 5
-./prow-status -g -t                      # group by platform, table rendering
-./prow-status -j "aws" -n 3 -u           # show gcsweb URLs in legend
+./pb -j "aws-4.22" -n 5
+./pb -g -t                      # group by platform, table rendering
+./pb -j "aws" -n 3 -u           # show gcsweb URLs in legend
 
 # Database introspection
-./prow-status --stats
-./prow-status --query "SELECT job, count(*) FROM runs GROUP BY job"
+./pb --stats
+./pb --query "SELECT job, count(*) FROM runs GROUP BY job"
 
 # Interactive artifact browser
-./prow-status browse 9408512             # browse by run ID (auto-pulls if needed)
-./prow-status browse -p pr-logs/pull/... # browse arbitrary GCS path
-./prow-status browse -p https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/...
+./pb browse 9408512             # browse by run ID (auto-pulls if needed)
+./pb browse -p pr-logs/pull/... # browse arbitrary GCS path
+./pb browse -p https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/pr-logs/...
 
 # Debug logging
-./prow-status fetch -v
+./pb fetch -v
 
 # GCS call log (written automatically on any GCS operation)
-cat ~/.local/share/prow-status/gcs.log
+cat ~/.local/share/prow-browse/gcs.log
 ```
 
 ### Browse keys

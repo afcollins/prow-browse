@@ -46,7 +46,7 @@ func main() {
 	var verbose bool
 
 	rootCmd := &cobra.Command{
-		Use:   "prow-status [run-id-suffix ...]",
+		Use:   "prow-browse [run-id-suffix ...]",
 		Short: "Display Prow CI job status grid from local database",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if verbose {
@@ -246,7 +246,7 @@ func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, us
 		logrus.WithError(err).Fatal("failed to query database")
 	}
 	if len(results) == 0 {
-		logrus.Info("no matching runs in local database; run 'prow-status fetch' to populate")
+		logrus.Info("no matching runs in local database; run 'prow-browse fetch' to populate")
 		return
 	}
 
@@ -392,7 +392,7 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, depth int) {
 		}
 		fmt.Printf("  %s\n", nr.runID)
 	}
-	fmt.Printf("\n%d new runs stored. Use 'prow-status pull -n <N>' to fetch step data.\n", len(newRuns))
+	fmt.Printf("\n%d new runs stored. Use 'prow-browse pull -n <N>' to fetch step data.\n", len(newRuns))
 }
 
 // TODO Audit this function to see what it is actually listing because it takes far too long
@@ -452,7 +452,7 @@ func runPull(db *DB, cfg *Config, suffixes []string, jobFilter string, numRuns i
 	}
 
 	if len(targets) == 0 {
-		fmt.Println("no runs to pull; use 'prow-status fetch' to discover new runs")
+		fmt.Println("no runs to pull; use 'prow-browse fetch' to discover new runs")
 		return
 	}
 

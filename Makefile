@@ -1,4 +1,4 @@
-BINARY  := prow-status
+BINARY  := pb
 BUILD_DATE = $(shell date '+%Y-%m-%d-%H:%M:%S')
 VERSION := $(shell git rev-parse --short HEAD)
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.BuildDate=$(BUILD_DATE) -X main.GitCommit=$(VERSION)

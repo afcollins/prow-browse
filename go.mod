@@ -1,4 +1,4 @@
-module github.com/ancollin/prow-status
+module github.com/afcollins/prow-browse
 
 go 1.25.8
 

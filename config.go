@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-const appName = "prow-status"
+const appName = "prow-browse"
 
 type Config struct {
 	Bucket             string   `json:"bucket"`
@@ -24,7 +24,7 @@ type Config struct {
 }
 
 // defaultConfigPath returns the config path, checking ./config.json first,
-// then ~/.config/prow-status/config.json.
+// then ~/.config/prow-browse/config.json.
 func defaultConfigPath() string {
 	local := "config.json"
 	if _, err := os.Stat(local); err == nil {

@@ -8,12 +8,12 @@ CLI tool (Go) that queries a GCS bucket containing OpenShift CI (Prow) periodic 
 
 ```bash
 make build && make test && make lint
-./prow-status -j "aws-4.22" -n 5        # display from local DB
-./prow-status fetch -j "120nodes" -n 10  # discover run IDs from GCS
-./prow-status pull -n 3 -j "aws"         # pull step data for latest unpulled
-./prow-status pull 2038435361289408512   # force re-pull specific run
-./prow-status browse 9408512             # interactive artifact browser
-./prow-status browse -p pr-logs/pull/... # browse arbitrary GCS path
+./pb -j "aws-4.22" -n 5        # display from local DB
+./pb fetch -j "120nodes" -n 10  # discover run IDs from GCS
+./pb pull -n 3 -j "aws"         # pull step data for latest unpulled
+./pb pull 2038435361289408512   # force re-pull specific run
+./pb browse 9408512             # interactive artifact browser
+./pb browse -p pr-logs/pull/... # browse arbitrary GCS path
 ```
 
 ## Architecture
@@ -21,7 +21,7 @@ make build && make test && make lint
 Single-binary Go CLI using cobra subcommands, all source in the root package:
 
 - `main.go` - Entry point, cobra commands: root (local display), `fetch` (discovery), `pull` (artifact traversal), `browse` (interactive TUI)
-- `gcs.go` - GCS operations: recursive listing + concurrent `finished.json` reads, logrus-based call logging to `~/.local/share/prow-status/gcs.log`
+- `gcs.go` - GCS operations: recursive listing + concurrent `finished.json` reads, logrus-based call logging to `~/.local/share/prow-browse/gcs.log`
 - `browse.go` - Bubbletea TUI for artifact browsing: tree navigation, search, viewport scrolling, batch download with dedup
 - `browse_gcs.go` - GCS helpers for browse: `listDir` (delimiter-based listing), `downloadObject` (stream to file)
 - `db.go` - SQLite storage (modernc.org/sqlite). Steps table stores result (SUCCESS/FAILURE/UNKNOWN). Schema auto-migrates.
