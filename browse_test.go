@@ -2,80 +2,80 @@ package main
 
 import "testing"
 
-func TestFilterDownloaded(t *testing.T) {
-	mkNode := func(path string) *treeNode {
-		return &treeNode{name: path, gcsPath: path}
+func TestCollectFiles(t *testing.T) {
+	tree := []*treeNode{
+		{name: "a.txt", gcsPath: "a.txt"},
+		{name: "dir", isDir: true, children: []*treeNode{
+			{name: "b.txt", gcsPath: "dir/b.txt"},
+			{name: "sub", isDir: true, children: []*treeNode{
+				{name: "c.txt", gcsPath: "dir/sub/c.txt"},
+			}},
+		}},
+		{name: "d.txt", gcsPath: "d.txt"},
 	}
 
-	tests := []struct {
-		name         string
-		files        []*treeNode
-		downloaded   map[string]bool
-		wantDownload int
-		wantSkipped  int
-	}{
-		{
-			name:         "all new",
-			files:        []*treeNode{mkNode("a.txt"), mkNode("b.txt")},
-			downloaded:   map[string]bool{},
-			wantDownload: 2,
-			wantSkipped:  0,
-		},
-		{
-			name:         "all already downloaded",
-			files:        []*treeNode{mkNode("a.txt"), mkNode("b.txt")},
-			downloaded:   map[string]bool{"a.txt": true, "b.txt": true},
-			wantDownload: 0,
-			wantSkipped:  2,
-		},
-		{
-			name:         "mix of new and downloaded",
-			files:        []*treeNode{mkNode("a.txt"), mkNode("b.txt"), mkNode("c.txt")},
-			downloaded:   map[string]bool{"b.txt": true},
-			wantDownload: 2,
-			wantSkipped:  1,
-		},
-		{
-			name:         "empty input",
-			files:        nil,
-			downloaded:   map[string]bool{},
-			wantDownload: 0,
-			wantSkipped:  0,
-		},
-		{
-			name:         "nil downloaded map",
-			files:        []*treeNode{mkNode("a.txt")},
-			downloaded:   nil,
-			wantDownload: 1,
-			wantSkipped:  0,
-		},
+	files := collectFiles(tree)
+	want := []string{"a.txt", "dir/b.txt", "dir/sub/c.txt", "d.txt"}
+	if len(files) != len(want) {
+		t.Fatalf("got %d files, want %d", len(files), len(want))
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			toDownload, skipped := filterDownloaded(tt.files, tt.downloaded)
-			if len(toDownload) != tt.wantDownload {
-				t.Errorf("toDownload: got %d, want %d", len(toDownload), tt.wantDownload)
-			}
-			if len(skipped) != tt.wantSkipped {
-				t.Errorf("skipped: got %d, want %d", len(skipped), tt.wantSkipped)
-			}
-		})
+	for i, f := range files {
+		if f.gcsPath != want[i] {
+			t.Errorf("files[%d] = %s, want %s", i, f.gcsPath, want[i])
+		}
 	}
 }
 
-func TestFilterDownloadedPreservesOrder(t *testing.T) {
-	files := []*treeNode{
-		{gcsPath: "a"}, {gcsPath: "b"}, {gcsPath: "c"}, {gcsPath: "d"},
+func TestCollectFilesEmpty(t *testing.T) {
+	files := collectFiles(nil)
+	if len(files) != 0 {
+		t.Errorf("got %d files, want 0", len(files))
 	}
-	downloaded := map[string]bool{"b": true, "d": true}
+}
 
-	toDownload, skipped := filterDownloaded(files, downloaded)
-
-	if len(toDownload) != 2 || toDownload[0].gcsPath != "a" || toDownload[1].gcsPath != "c" {
-		t.Errorf("toDownload order wrong: %v", toDownload)
+func TestSetCheckedRecursive(t *testing.T) {
+	nodes := []*treeNode{
+		{name: "a.txt"},
+		{name: "dir", isDir: true, children: []*treeNode{
+			{name: "b.txt"},
+			{name: "sub", isDir: true, children: []*treeNode{
+				{name: "c.txt"},
+			}},
+		}},
 	}
-	if len(skipped) != 2 || skipped[0].gcsPath != "b" || skipped[1].gcsPath != "d" {
-		t.Errorf("skipped order wrong: %v", skipped)
+
+	setCheckedRecursive(nodes, true)
+	if !nodes[0].checked || !nodes[1].checked || !nodes[1].children[0].checked || !nodes[1].children[1].children[0].checked {
+		t.Error("not all nodes checked after setCheckedRecursive(true)")
+	}
+
+	setCheckedRecursive(nodes, false)
+	if nodes[0].checked || nodes[1].checked || nodes[1].children[0].checked || nodes[1].children[1].children[0].checked {
+		t.Error("some nodes still checked after setCheckedRecursive(false)")
+	}
+}
+
+func TestCheckedItemsSkipsChildrenOfCheckedDir(t *testing.T) {
+	m := browseModel{
+		root: []*treeNode{
+			{name: "dir", isDir: true, checked: true, children: []*treeNode{
+				{name: "a.txt", checked: true},
+				{name: "b.txt", checked: true},
+			}},
+			{name: "c.txt", checked: true},
+			{name: "d.txt", checked: false},
+		},
+	}
+
+	items := m.checkedItems()
+	// Should return: dir (not its children) + c.txt = 2
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2", len(items))
+	}
+	if items[0].name != "dir" {
+		t.Errorf("items[0] = %s, want dir", items[0].name)
+	}
+	if items[1].name != "c.txt" {
+		t.Errorf("items[1] = %s, want c.txt", items[1].name)
 	}
 }

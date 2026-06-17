@@ -280,8 +280,9 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case " ":
 			if m.cursor < len(m.flat) {
 				node := m.flat[m.cursor]
-				if !node.isDir {
-					node.checked = !node.checked
+				node.checked = !node.checked
+				if node.isDir {
+					setCheckedRecursive(node.children, node.checked)
 				}
 			}
 		case "/":
@@ -294,13 +295,13 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "N":
 			m.searchNext(-1)
 		case "d":
-			checked := m.checkedFiles()
+			checked := m.checkedItems()
 			if len(checked) == 0 {
 				m.status = "no files checked"
 				return m, nil
 			}
-			m.status = fmt.Sprintf("downloading %d files...", len(checked))
-			return m, m.downloadFiles(checked)
+			m.status = fmt.Sprintf("downloading %d items...", len(checked))
+			return m, m.downloadItems(checked)
 		}
 
 	case listDirDoneMsg:
@@ -412,11 +413,15 @@ func (m browseModel) View() string {
 
 		var icon string
 		if node.isDir {
+			arrow := "▸ "
 			if node.expanded {
-				icon = "▾ "
-			} else {
-				icon = "▸ "
+				arrow = "▾ "
 			}
+			check := "[ ] "
+			if node.checked {
+				check = "[x] "
+			}
+			icon = arrow + check
 		} else {
 			if node.checked {
 				icon = "[x] "
@@ -460,12 +465,26 @@ func (m browseModel) View() string {
 	return b.String()
 }
 
-func (m browseModel) checkedFiles() []*treeNode {
+func setCheckedRecursive(nodes []*treeNode, checked bool) {
+	for _, n := range nodes {
+		n.checked = checked
+		if n.isDir {
+			setCheckedRecursive(n.children, checked)
+		}
+	}
+}
+
+func (m browseModel) checkedItems() []*treeNode {
 	var checked []*treeNode
 	var walk func(nodes []*treeNode)
 	walk = func(nodes []*treeNode) {
 		for _, n := range nodes {
-			if !n.isDir && n.checked {
+			if n.checked && n.isDir {
+				checked = append(checked, n)
+				// skip children — dir download handles them recursively
+				continue
+			}
+			if n.checked {
 				checked = append(checked, n)
 			}
 			if n.isDir {
@@ -484,22 +503,41 @@ func (m browseModel) loadDir(node *treeNode) tea.Cmd {
 	}
 }
 
-func filterDownloaded(files []*treeNode, downloaded map[string]bool) (toDownload, skipped []*treeNode) {
-	for _, f := range files {
-		if downloaded[f.gcsPath] {
-			skipped = append(skipped, f)
+func collectFiles(nodes []*treeNode) []*treeNode {
+	var files []*treeNode
+	for _, n := range nodes {
+		if n.isDir {
+			files = append(files, collectFiles(n.children)...)
+		} else {
+			files = append(files, n)
+		}
+	}
+	return files
+}
+
+func (m browseModel) downloadItems(items []*treeNode) tea.Cmd {
+	var allFiles []*treeNode
+	for _, item := range items {
+		if item.isDir {
+			allFiles = append(allFiles, collectFiles(item.children)...)
+		} else {
+			allFiles = append(allFiles, item)
+		}
+	}
+
+	var toDownload []*treeNode
+	skipped := 0
+	for _, f := range allFiles {
+		if m.downloaded[f.gcsPath] {
+			skipped++
 		} else {
 			toDownload = append(toDownload, f)
 		}
 	}
-	return toDownload, skipped
-}
 
-func (m browseModel) downloadFiles(files []*treeNode) tea.Cmd {
-	toDownload, skipped := filterDownloaded(files, m.downloaded)
 	if len(toDownload) == 0 {
 		return func() tea.Msg {
-			return downloadDoneMsg{skipped: len(skipped)}
+			return downloadDoneMsg{skipped: skipped}
 		}
 	}
 	return func() tea.Msg {
@@ -507,10 +545,10 @@ func (m browseModel) downloadFiles(files []*treeNode) tea.Cmd {
 		for _, f := range toDownload {
 			localPath := m.outputDir + "/" + f.gcsPath
 			if err := m.gcs.downloadObject(context.Background(), f.gcsPath, localPath); err != nil {
-				return downloadDoneMsg{count: len(paths), paths: paths, skipped: len(skipped), err: err}
+				return downloadDoneMsg{count: len(paths), paths: paths, skipped: skipped, err: err}
 			}
 			paths = append(paths, f.gcsPath)
 		}
-		return downloadDoneMsg{count: len(paths), paths: paths, skipped: len(skipped)}
+		return downloadDoneMsg{count: len(paths), paths: paths, skipped: skipped}
 	}
 }
