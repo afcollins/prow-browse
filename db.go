@@ -67,6 +67,8 @@ func initSchema(db *sql.DB) error {
 
 	// Migrate: add result column if it doesn't exist (for existing databases)
 	_, _ = db.Exec(`ALTER TABLE steps ADD COLUMN result INTEGER NOT NULL DEFAULT 3`)
+	// Migrate: add source column to runs
+	_, _ = db.Exec(`ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -78,7 +80,7 @@ func (d *DB) StoreResults(results []RunResult) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	runStmt, err := tx.Prepare(`INSERT OR REPLACE INTO runs (job, run_id, variant) VALUES (?, ?, ?)`)
+	runStmt, err := tx.Prepare(`INSERT OR REPLACE INTO runs (job, run_id, variant, source) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -116,7 +118,7 @@ func (d *DB) StoreResults(results []RunResult) error {
 		if _, err := delStepStmt.Exec(r.Job, r.RunID); err != nil {
 			return fmt.Errorf("deleting old steps %s/%s: %w", r.Job, r.RunID, err)
 		}
-		if _, err := runStmt.Exec(r.Job, r.RunID, r.VariantID); err != nil {
+		if _, err := runStmt.Exec(r.Job, r.RunID, r.VariantID, r.Source); err != nil {
 			return fmt.Errorf("inserting run %s/%s: %w", r.Job, r.RunID, err)
 		}
 		for stepName, result := range r.Steps {
@@ -156,12 +158,12 @@ func (d *DB) SeenRuns(job string) (map[string]bool, error) {
 }
 
 type runInfo struct {
-	job, runID, variant string
+	job, runID, variant, source string
 }
 
 // QueryResults loads RunResults from the database, filtered by an optional job substring.
 func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
-	query := `SELECT job, run_id, variant FROM runs`
+	query := `SELECT job, run_id, variant, source FROM runs`
 	var args []interface{}
 
 	if jobFilter != "" {
@@ -180,7 +182,7 @@ func (d *DB) QueryResults(jobFilter string) ([]RunResult, error) {
 	var allRuns []runInfo
 	for rows.Next() {
 		var ri runInfo
-		if err := rows.Scan(&ri.job, &ri.runID, &ri.variant); err != nil {
+		if err := rows.Scan(&ri.job, &ri.runID, &ri.variant, &ri.source); err != nil {
 			return nil, err
 		}
 		allRuns = append(allRuns, ri)
@@ -205,7 +207,7 @@ func (d *DB) QueryResultsByRunIDs(runIDs []string) ([]RunResult, error) {
 		args[i] = id
 	}
 
-	query := `SELECT job, run_id, variant FROM runs WHERE run_id IN (` +
+	query := `SELECT job, run_id, variant, source FROM runs WHERE run_id IN (` +
 		strings.Join(placeholders, ",") + `) ORDER BY run_id DESC`
 
 	rows, err := d.db.Query(query, args...)
@@ -217,7 +219,7 @@ func (d *DB) QueryResultsByRunIDs(runIDs []string) ([]RunResult, error) {
 	var allRuns []runInfo
 	for rows.Next() {
 		var ri runInfo
-		if err := rows.Scan(&ri.job, &ri.runID, &ri.variant); err != nil {
+		if err := rows.Scan(&ri.job, &ri.runID, &ri.variant, &ri.source); err != nil {
 			return nil, err
 		}
 		allRuns = append(allRuns, ri)
@@ -365,14 +367,14 @@ func (d *DB) StoreRuns(results []RunResult) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO runs (job, run_id, variant) VALUES (?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO runs (job, run_id, variant, source) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = stmt.Close() }()
 
 	for _, r := range results {
-		if _, err := stmt.Exec(r.Job, r.RunID, r.VariantID); err != nil {
+		if _, err := stmt.Exec(r.Job, r.RunID, r.VariantID, r.Source); err != nil {
 			return fmt.Errorf("inserting run %s/%s: %w", r.Job, r.RunID, err)
 		}
 	}
