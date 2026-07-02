@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -67,6 +68,7 @@ type browseModel struct {
 	searchBuf  string
 	downloaded map[string]bool
 	openKbx   bool
+	openFile  *treeNode
 }
 
 type listDirDoneMsg struct {
@@ -86,9 +88,13 @@ type kbxDoneMsg struct {
 	err error
 }
 
+type openDoneMsg struct {
+	err error
+}
+
 const headerLines = 4 // title + help + blank line + border
 const footerLines = 4 // scroll indicator + blank + status + border
-const helpText = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  / search  d download  x kbx  q quit"
+const helpText = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  c clear  / search  d download  o open  x kbx  q quit"
 
 func newBrowseModel(gcs *gcsClient, cfg *Config, result RunResult, outputDir string) browseModel {
 	var root []*treeNode
@@ -366,6 +372,21 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openKbx = true
 			m.status = fmt.Sprintf("downloading %d items for kbx...", len(checked))
 			return m, m.downloadItems(checked)
+		case "o":
+			if m.cursor >= len(m.flat) {
+				return m, nil
+			}
+			node := m.flat[m.cursor]
+			if node.isDir {
+				m.status = "cannot open directory"
+				return m, nil
+			}
+			m.openFile = node
+			m.status = fmt.Sprintf("downloading %s...", node.name)
+			return m, m.downloadItems([]*treeNode{node})
+		case "c":
+			setCheckedRecursive(m.root, false)
+			m.status = "cleared all selections"
 		}
 
 	case listDirDoneMsg:
@@ -395,6 +416,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.status = "download error: " + msg.err.Error()
 			m.openKbx = false
+			m.openFile = nil
 			return m, nil
 		}
 		if msg.count == 0 && msg.skipped > 0 {
@@ -419,6 +441,24 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				return kbxDoneMsg{err: err}
 			})
+		}
+
+		if m.openFile != nil {
+			node := m.openFile
+			m.openFile = nil
+			localPath := m.outputDir + "/" + node.gcsPath
+			m.status = fmt.Sprintf("opening %s...", node.name)
+			c := openCommand(localPath)
+			return m, tea.ExecProcess(c, func(err error) tea.Msg {
+				return openDoneMsg{err: err}
+			})
+		}
+
+	case openDoneMsg:
+		if msg.err != nil {
+			m.status = "open error: " + msg.err.Error()
+		} else {
+			m.status = "returned from viewer"
 		}
 
 	case kbxDoneMsg:
@@ -616,6 +656,20 @@ func (m browseModel) loadDir(node *treeNode) tea.Cmd {
 	return func() tea.Msg {
 		entries, err := m.gcs.listDir(context.Background(), node.gcsPath)
 		return listDirDoneMsg{node: node, entries: entries, err: err}
+	}
+}
+
+func openCommand(path string) *exec.Cmd {
+	name := strings.ToLower(filepath.Base(path))
+	switch {
+	case strings.HasSuffix(name, ".json.gz"):
+		return exec.Command("sh", "-c", fmt.Sprintf("zcat %q | jq . | vim -R -c 'set ft=json' -", path))
+	case strings.HasSuffix(name, ".json"):
+		return exec.Command("sh", "-c", fmt.Sprintf("jq . %q | vim -R -c 'set ft=json' -", path))
+	case strings.HasSuffix(name, ".log.gz"):
+		return exec.Command("sh", "-c", fmt.Sprintf("zcat %q | vim -R -", path))
+	default:
+		return exec.Command("vim", "-R", path)
 	}
 }
 
