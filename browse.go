@@ -6,7 +6,36 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	tea "github.com/charmbracelet/bubbletea"
+)
+
+var (
+	browseColorPrimary = lipgloss.Color("#7D56F4")
+	browseColorMuted   = lipgloss.Color("#888888")
+	browseColorSuccess = lipgloss.Color("#2ECC71")
+	browseColorDanger  = lipgloss.Color("#E74C3C")
+	browseColorAccent  = lipgloss.Color("#F7DC6F")
+
+	browseTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(browseColorPrimary)
+
+	browseSelectedStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(browseColorPrimary)
+
+	browseHelpStyle = lipgloss.NewStyle().
+			Foreground(browseColorMuted)
+
+	browseStatusStyle = lipgloss.NewStyle().
+				Foreground(browseColorMuted)
+
+	browsePanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(browseColorPrimary).
+				Padding(0, 1)
 )
 
 type treeNode struct {
@@ -53,8 +82,8 @@ type downloadDoneMsg struct {
 	err     error
 }
 
-const headerLines = 2 // "Browse: ..." + blank line
-const footerLines = 2 // blank line + status
+const headerLines = 4 // title + help + blank line + border
+const footerLines = 4 // scroll indicator + blank + status + border
 const helpText = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  / search  d download  q quit"
 
 func newBrowseModel(gcs *gcsClient, cfg *Config, result RunResult, outputDir string) browseModel {
@@ -393,8 +422,11 @@ func (m browseModel) View() string {
 	}
 
 	var b strings.Builder
-	header := fmt.Sprintf(" Browse: %s\n\n", m.title)
-	b.WriteString(header)
+
+	b.WriteString(browseTitleStyle.Render(fmt.Sprintf("Browse: %s", m.title)))
+	b.WriteString("\n")
+	b.WriteString(browseHelpStyle.Render(helpText))
+	b.WriteString("\n\n")
 
 	vis := m.visibleRows()
 	end := m.offset + vis
@@ -402,13 +434,11 @@ func (m browseModel) View() string {
 		end = len(m.flat)
 	}
 
+	checkOn := lipgloss.NewStyle().Foreground(browseColorSuccess).Render("✓ ")
+	checkOff := "  "
+
 	for i := m.offset; i < end; i++ {
 		node := m.flat[i]
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "▸ "
-		}
-
 		indent := strings.Repeat("  ", node.depth)
 
 		var icon string
@@ -417,37 +447,45 @@ func (m browseModel) View() string {
 			if node.expanded {
 				arrow = "▾ "
 			}
-			check := "[ ] "
+			check := checkOff
 			if node.checked {
-				check = "[x] "
+				check = checkOn
 			}
 			icon = arrow + check
 		} else {
 			if node.checked {
-				icon = "[x] "
+				icon = checkOn
 			} else {
-				icon = "[ ] "
+				icon = checkOff
 			}
 		}
 
-		line := cursor + indent + icon + node.name
+		name := node.name
 		if node.isDir {
-			line += "/"
+			name += "/"
 			if node.result != StepMissing {
 				switch node.result {
 				case StepSuccess:
-					line += "  ✅"
+					name += "  ✅"
 				case StepFailure:
-					line += "  ❌"
+					name += "  ❌"
 				case StepUnknown:
-					line += "  👻"
+					name += "  👻"
 				}
 			}
 		}
-		b.WriteString(line + "\n")
+
+		line := indent + icon + name
+		if i == m.cursor {
+			line = browseSelectedStyle.Render(line)
+		}
+
+		b.WriteString(line)
+		if i < end-1 {
+			b.WriteString("\n")
+		}
 	}
 
-	// Scroll indicator
 	if len(m.flat) > vis {
 		pos := ""
 		if m.offset == 0 {
@@ -458,11 +496,28 @@ func (m browseModel) View() string {
 			pct := m.offset * 100 / (len(m.flat) - vis)
 			pos = fmt.Sprintf("(%d%%)", pct)
 		}
-		fmt.Fprintf(&b, " -- %d items %s --\n", len(m.flat), pos)
+		b.WriteString("\n")
+		b.WriteString(browseHelpStyle.Render(fmt.Sprintf("-- %d items %s --", len(m.flat), pos)))
 	}
 
-	b.WriteString("\n " + m.status + "\n")
-	return b.String()
+	// Status / search bar
+	b.WriteString("\n\n")
+	if m.searching {
+		b.WriteString(lipgloss.NewStyle().Foreground(browseColorAccent).Render(
+			fmt.Sprintf("/%s█", m.searchBuf)))
+	} else {
+		b.WriteString(browseStatusStyle.Render(m.status))
+	}
+
+	panelW := m.width - 2
+	if panelW < 40 {
+		panelW = 40
+	}
+	panelH := m.height - 2
+	if panelH < 10 {
+		panelH = 10
+	}
+	return browsePanelStyle.Width(panelW).Height(panelH).Render(b.String())
 }
 
 func setCheckedRecursive(nodes []*treeNode, checked bool) {
