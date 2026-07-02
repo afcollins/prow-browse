@@ -16,8 +16,8 @@ var (
 	browseColorSuccess = lipgloss.Color("#2ECC71")
 
 	browseTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(browseColorPrimary)
+				Bold(true).
+				Foreground(browseColorPrimary)
 
 	browseSelectedStyle = lipgloss.NewStyle().
 				Bold(true).
@@ -276,7 +276,25 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "end", "G":
 			m.cursor = len(m.flat) - 1
 			m.scrollToCursor()
-		case "right", "enter":
+		case "enter":
+			if m.cursor < len(m.flat) {
+				node := m.flat[m.cursor]
+				if node.isDir {
+					if node.expanded {
+						node.expanded = false
+						m.rebuildFlat()
+						m.scrollToCursor()
+					} else {
+						node.expanded = true
+						if !node.loaded {
+							m.status = "loading " + node.name + "..."
+							return m, m.loadDir(node)
+						}
+						m.rebuildFlat()
+					}
+				}
+			}
+		case "right":
 			if m.cursor < len(m.flat) {
 				node := m.flat[m.cursor]
 				if node.isDir && !node.expanded {
