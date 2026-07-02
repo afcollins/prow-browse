@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 
@@ -65,6 +66,7 @@ type browseModel struct {
 	searching  bool
 	searchBuf  string
 	downloaded map[string]bool
+	openKbx   bool
 }
 
 type listDirDoneMsg struct {
@@ -80,9 +82,13 @@ type downloadDoneMsg struct {
 	err     error
 }
 
+type kbxDoneMsg struct {
+	err error
+}
+
 const headerLines = 4 // title + help + blank line + border
 const footerLines = 4 // scroll indicator + blank + status + border
-const helpText = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  / search  d download  q quit"
+const helpText = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  / search  d download  x kbx  q quit"
 
 func newBrowseModel(gcs *gcsClient, cfg *Config, result RunResult, outputDir string) browseModel {
 	var root []*treeNode
@@ -347,6 +353,19 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.status = fmt.Sprintf("downloading %d items...", len(checked))
 			return m, m.downloadItems(checked)
+		case "x":
+			checked := m.checkedItems()
+			if len(checked) == 0 {
+				m.status = "no files checked"
+				return m, nil
+			}
+			if _, err := exec.LookPath("kbx"); err != nil {
+				m.status = "kbx not found in PATH"
+				return m, nil
+			}
+			m.openKbx = true
+			m.status = fmt.Sprintf("downloading %d items for kbx...", len(checked))
+			return m, m.downloadItems(checked)
 		}
 
 	case listDirDoneMsg:
@@ -375,12 +394,38 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.status = "download error: " + msg.err.Error()
-		} else if msg.count == 0 && msg.skipped > 0 {
+			m.openKbx = false
+			return m, nil
+		}
+		if msg.count == 0 && msg.skipped > 0 {
 			m.status = fmt.Sprintf("all %d files already downloaded", msg.skipped)
 		} else if msg.skipped > 0 {
 			m.status = fmt.Sprintf("downloaded %d files (%d already downloaded)", msg.count, msg.skipped)
 		} else {
 			m.status = fmt.Sprintf("downloaded %d files to %s", msg.count, m.outputDir)
+		}
+		if m.openKbx {
+			m.openKbx = false
+			var localPaths []string
+			for _, node := range collectFiles(m.checkedItems()) {
+				localPaths = append(localPaths, m.outputDir+"/"+node.gcsPath)
+			}
+			if len(localPaths) == 0 {
+				m.status = "no files to open in kbx"
+				return m, nil
+			}
+			m.status = fmt.Sprintf("opening %d files in kbx...", len(localPaths))
+			c := exec.Command("kbx", localPaths...)
+			return m, tea.ExecProcess(c, func(err error) tea.Msg {
+				return kbxDoneMsg{err: err}
+			})
+		}
+
+	case kbxDoneMsg:
+		if msg.err != nil {
+			m.status = "kbx error: " + msg.err.Error()
+		} else {
+			m.status = "returned from kbx"
 		}
 	}
 
