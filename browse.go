@@ -441,9 +441,9 @@ func (m browseModel) View() string {
 
 		var icon string
 		if node.isDir {
-			arrow := "▸ "
+			arrow := "▸"
 			if node.expanded {
-				arrow = "▾ "
+				arrow = "▾"
 			}
 			check := checkOff
 			if node.checked {
@@ -452,9 +452,9 @@ func (m browseModel) View() string {
 			icon = arrow + check
 		} else {
 			if node.checked {
-				icon = checkOn
+				icon = " " + checkOn
 			} else {
-				icon = checkOff
+				icon = " " + checkOff
 			}
 		}
 
