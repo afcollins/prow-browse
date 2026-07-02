@@ -14,8 +14,6 @@ var (
 	browseColorPrimary = lipgloss.Color("#7D56F4")
 	browseColorMuted   = lipgloss.Color("#888888")
 	browseColorSuccess = lipgloss.Color("#2ECC71")
-	browseColorDanger  = lipgloss.Color("#E74C3C")
-	browseColorAccent  = lipgloss.Color("#F7DC6F")
 
 	browseTitleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -503,7 +501,7 @@ func (m browseModel) View() string {
 	// Status / search bar
 	b.WriteString("\n\n")
 	if m.searching {
-		b.WriteString(lipgloss.NewStyle().Foreground(browseColorAccent).Render(
+		b.WriteString(lipgloss.NewStyle().Foreground(browseColorPrimary).Render(
 			fmt.Sprintf("/%s█", m.searchBuf)))
 	} else {
 		b.WriteString(browseStatusStyle.Render(m.status))
