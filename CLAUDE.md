@@ -22,7 +22,7 @@ Single-binary Go CLI using cobra subcommands, all source in the root package:
 
 - `main.go` - Entry point, cobra commands: root (local display), `fetch` (discovery), `pull` (artifact traversal), `browse` (interactive TUI)
 - `gcs.go` - GCS operations: recursive listing + concurrent `finished.json` reads, logrus-based call logging to `~/.local/share/prow-browse/gcs.log`
-- `browse.go` - Bubbletea TUI for artifact browsing: tree navigation, search, viewport scrolling, batch download with dedup
+- `browse.go` - Bubbletea TUI for artifact browsing: tree navigation, search, viewport scrolling, batch download with dedup, file-type open (vim/jq), kbx integration via `tea.ExecProcess`
 - `browse_gcs.go` - GCS helpers for browse: `listDir` (delimiter-based listing), `downloadObject` (stream to file)
 - `db.go` - SQLite storage (modernc.org/sqlite). Steps table stores result (SUCCESS/FAILURE/UNKNOWN). Schema auto-migrates.
 - `display.go` - Grid orchestration, platform/job-type classification, ANSI raw renderer
@@ -47,6 +47,8 @@ Single-binary Go CLI using cobra subcommands, all source in the root package:
 - `browse` builds initial tree from DB (zero GCS calls if run is pulled); lazy GCS expansion on dir open
 - `browse --path` accepts bucket-relative paths, gs:// URLs, or gcsweb URLs with auto-normalization
 - Downloads mirror full GCS bucket path under `download_dir`; already-downloaded files skipped
+- `browse` opens files via `tea.ExecProcess` subprocess handoff: `x` launches kbx on checked files, `o` opens cursor file with type-appropriate viewer (json→jq|vim, log.gz→zcat|vim, else→vim)
+- `c` clears all checked selections in browse
 
 ## GCS bucket structure
 

@@ -62,9 +62,12 @@ cat ~/.local/share/prow-browse/gcs.log
 | →/Enter | Expand directory (lazy GCS listing) |
 | ← | Collapse directory (or jump to parent) |
 | Space | Toggle file checkbox |
+| c | Clear all selections |
 | / | Search by name |
 | n/N | Next/previous search match |
 | d | Download checked files |
+| o | Open file under cursor (json→jq\|vim, log.gz→zcat\|vim, else→vim) |
+| x | Download checked files and open in [kbx](../kbx/) |
 | PgUp/PgDn | Scroll page |
 | g/G | Jump to top/bottom |
 | Ctrl+Z | Suspend to shell (`fg` to resume) |
