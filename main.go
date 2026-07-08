@@ -115,15 +115,14 @@ func main() {
 
 			jobFilter, _ := cmd.Flags().GetString("jobs")
 			showAll, _ := cmd.Flags().GetBool("all")
-			numRuns, _ := cmd.Flags().GetInt("number")
 
-			runFetch(db, cfg, jobFilter, showAll, numRuns)
+			runFetch(db, cfg, jobFilter, showAll)
 			return nil
 		},
 	}
 	fetchCmd.Flags().StringP("jobs", "j", "", "Filter job names by substring")
 	fetchCmd.Flags().Bool("all", false, "Re-fetch runs already in the database")
-	fetchCmd.Flags().IntP("number", "n", 5, "Runs per job to look back in GCS")
+
 
 	pullCmd := &cobra.Command{
 		Use:   "pull [run-id-suffix ...]",
@@ -264,7 +263,7 @@ func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, us
 	displayGrid(results, cfg, group, useTable, showURLs)
 }
 
-func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, depth int) {
+func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool) {
 	ctx := context.Background()
 	client, err := newGCSClient(ctx, cfg)
 	if err != nil {
@@ -321,9 +320,6 @@ func runFetch(db *DB, cfg *Config, jobFilter string, showAll bool, depth int) {
 			logrus.WithFields(logrus.Fields{"job": shortJobName(j, cfg), "runs": len(runs)}).Debug("listed runs")
 
 			sort.Sort(sort.Reverse(sort.StringSlice(runs)))
-			if depth > 0 && len(runs) > depth {
-				runs = runs[:depth]
-			}
 
 			seenSet, err := db.SeenRuns(j)
 			if err != nil {
