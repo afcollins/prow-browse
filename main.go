@@ -601,7 +601,14 @@ func runBrowse(db *DB, cfg *Config, suffix, outputDir string) error {
 func runBrowsePath(cfg *Config, rawPath, outputDir string) error {
 	ctx := context.Background()
 
-	gcsPath := normalizeGCSPath(rawPath, cfg.Bucket)
+	bucket, gcsPath := normalizeGCSPath(rawPath, cfg.Bucket)
+	if bucket != cfg.Bucket {
+		logrus.WithFields(logrus.Fields{
+			"config_bucket": cfg.Bucket,
+			"url_bucket":    bucket,
+		}).Info("URL references different bucket, overriding for this session")
+		cfg.Bucket = bucket
+	}
 
 	client, err := newGCSClient(ctx, cfg)
 	if err != nil {
@@ -619,24 +626,48 @@ func runBrowsePath(cfg *Config, rawPath, outputDir string) error {
 	return err
 }
 
-func normalizeGCSPath(raw, bucket string) string {
+func normalizeGCSPath(raw, defaultBucket string) (bucket, path string) {
+	bucket = defaultBucket
+	stripped := false
+
 	// Strip prow URL prefix (e.g. https://prow.ci.openshift.org/view/gs/BUCKET/...)
 	if after, found := strings.CutPrefix(raw, "https://prow.ci.openshift.org/view/gs/"); found {
 		raw = after
+		stripped = true
 	}
-	// Strip gcsweb URL prefix
-	if after, ok := strings.CutPrefix(raw, gcsWebBaseURL); ok {
-		raw = after
+	// Strip gcsweb URL prefix — any host with /gcs/ path
+	if !stripped {
+		if idx := strings.Index(raw, "://"); idx >= 0 {
+			rest := raw[idx+3:]
+			if gcsIdx := strings.Index(rest, "/gcs/"); gcsIdx >= 0 {
+				raw = rest[gcsIdx+5:]
+				stripped = true
+			}
+		}
 	}
 	// Strip gs:// prefix
-	if after, ok := strings.CutPrefix(raw, "gs://"); ok {
-		raw = after
+	if !stripped {
+		if after, ok := strings.CutPrefix(raw, "gs://"); ok {
+			raw = after
+			stripped = true
+		}
 	}
-	// Strip bucket name prefix
-	if after, ok := strings.CutPrefix(raw, bucket+"/"); ok {
-		raw = after
+
+	// After stripping a URL scheme, first path segment is always the bucket name
+	if stripped {
+		if slashIdx := strings.Index(raw, "/"); slashIdx > 0 {
+			bucket = raw[:slashIdx]
+			raw = raw[slashIdx+1:]
+		}
+	} else {
+		// Bare path — only strip if it starts with the default bucket
+		if after, ok := strings.CutPrefix(raw, defaultBucket+"/"); ok {
+			raw = after
+		}
 	}
-	return strings.TrimSuffix(raw, "/")
+
+	path = strings.TrimSuffix(raw, "/")
+	return bucket, path
 }
 
 func runQuery(db *DB, query string) {
