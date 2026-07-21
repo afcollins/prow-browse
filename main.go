@@ -123,7 +123,6 @@ func main() {
 	fetchCmd.Flags().StringP("jobs", "j", "", "Filter job names by substring")
 	fetchCmd.Flags().Bool("all", false, "Re-fetch runs already in the database")
 
-
 	pullCmd := &cobra.Command{
 		Use:   "pull [run-id-suffix ...]",
 		Short: "Fetch step data for runs (latest unpulled via -n, or specific run IDs)",

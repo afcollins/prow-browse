@@ -67,8 +67,8 @@ type browseModel struct {
 	searching  bool
 	searchBuf  string
 	downloaded map[string]bool
-	openKbx   bool
-	openFile  *treeNode
+	openKbx    bool
+	openFile   *treeNode
 }
 
 type listDirDoneMsg struct {

@@ -393,11 +393,6 @@ func (g *gcsClient) scanStepObjectsWithBucket(ctx context.Context, bucket bucket
 	return steps, stepDirs, finishedPaths, nil
 }
 
-// listStepChildren returns immediate children of a step directory via delimiter-based listing.
-func (g *gcsClient) listStepChildren(ctx context.Context, prefix string) []string {
-	return g.listStepChildrenWithBucket(ctx, g.bucket(), prefix)
-}
-
 func (g *gcsClient) listStepChildrenWithBucket(ctx context.Context, bucket bucketLister, prefix string) []string {
 	t0 := time.Now()
 	query := &storage.Query{
