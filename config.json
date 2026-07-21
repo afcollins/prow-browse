@@ -4,10 +4,11 @@
     "columns_per_page": 20,
     "job_pattern": "periodic-ci-openshift-eng-ocp-perfscale",
     "no_recurse_steps": [
-        "gather-extra",
-        "gather-must-gather",
         "gather-audit-logs",
-        "gather-aws-console"
+        "gather-aws-console",
+        "gather-core-dump",
+        "gather-extra",
+        "gather-must-gather"
     ],
     "optional_steps": [
         "ovn-conf",
@@ -108,32 +109,30 @@
         "openshift-qe-virt-udn-density",
         "openshift-qe-orion-virt-udn-density",
 
-        "send-results-to-reportportal",
-
-        "aws-deprovision-users-and-policies",
-        "aws-deprovision-verification",
-        "ipi-deprovision-deprovision",
-
-        "rosa-cluster-deprovision",
-        "rosa-cluster-index",
-        "rosa-sts-account-roles-delete",
-        "rosa-sts-operator-roles-delete",
-
-        "rosa-hcp-cluster-deprovision",
-
-        "ipi-deprovision-vsphere-diags",
-        "ipi-deprovision-vsphere-dns",
-        "ipi-deprovision-vsphere-lb",
-        "ipi-deprovision-vsphere-lease",
-        "vsphere-deprovision",
-        "upi-deprovision-deprovision",
-
         "openshift-qe-installer-bm-must-gather",
 
         "gather-extra",
         "gather-must-gather",
         "gather-audit-logs",
         "gather-aws-console"
+
+    ],
+    "hide_steps": [
+        "aws-deprovision-users-and-policies",
+        "aws-deprovision-verification",
+        "ipi-deprovision-deprovision",
+        "ipi-deprovision-vsphere-diags",
+        "ipi-deprovision-vsphere-dns",
+        "ipi-deprovision-vsphere-lb",
+        "ipi-deprovision-vsphere-lease",
+        "rosa-cluster-deprovision",
+        "rosa-cluster-index",
+        "rosa-hcp-cluster-deprovision",
+        "rosa-sts-account-roles-delete",
+        "rosa-sts-operator-roles-delete",
+        "send-results-to-reportportal",
+        "upi-deprovision-deprovision",
+        "vsphere-deprovision"
     ],
     "max_runs_per_job": 3,
     "concurrency": 20

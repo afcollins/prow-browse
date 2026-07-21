@@ -88,6 +88,7 @@ Edit `config.json`:
 | `optional_steps` | Steps shown as `..` when absent (e.g., ovn-conf) |
 | `ignore_artifact_dirs` | Directories under `artifacts/` to skip during variant detection |
 | `step_order` | Ordered list of step names matching CI execution sequence |
+| `hide_steps` | Steps to exclude from grid display entirely |
 | `columns_per_page` | Max columns before paginating (default: 50) |
 | `max_runs_per_job` | Default max runs for `pull` when `-n` not specified |
 | `concurrency` | Max parallel GCS API calls |

@@ -16,6 +16,7 @@ type Config struct {
 	OptionalSteps      []string `json:"optional_steps"`
 	IgnoreArtifactDirs []string `json:"ignore_artifact_dirs"`
 	StepOrder          []string `json:"step_order"`
+	HideSteps          []string `json:"hide_steps"`
 	EmojiPalette       string   `json:"emoji_palette"`
 	MaxRunsPerJob      int      `json:"max_runs_per_job"`
 	Concurrency        int      `json:"concurrency"`

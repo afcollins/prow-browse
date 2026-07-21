@@ -249,6 +249,11 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 		gatherSet[s] = true
 	}
 
+	hideSet := make(map[string]bool)
+	for _, s := range cfg.HideSteps {
+		hideSet[s] = true
+	}
+
 	// Print header
 	fmt.Println()
 	fmt.Printf("%s%s%d run(s) across %d job(s)%s\n\n",
@@ -296,6 +301,9 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 		var stepNames []string
 		var gatherSteps []string
 		for _, s := range allStepNames {
+			if hideSet[s] {
+				continue
+			}
 			if !groupByPlatform || isStepForPlatform(s, platform) {
 				if gatherSet[s] {
 					gatherSteps = append(gatherSteps, s)
