@@ -345,16 +345,6 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 }
 
 func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
-	// Find the longest step name for padding
-	maxStepLen := 0
-	for _, s := range pd.stepNames {
-		if len(s) > maxStepLen {
-			maxStepLen = len(s)
-		}
-	}
-
-	colWidth := 3
-
 	// Print platform/page header
 	showHeader := groupByPlatform || pd.totalPages > 1
 	if showHeader {
@@ -401,15 +391,7 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 	}
 	fmt.Println()
 
-	// Print column header row
-	fmt.Printf("%-*s", maxStepLen+2, "")
-	for _, e := range pd.emojis {
-		fmt.Printf("%s ", e)
-	}
-	fmt.Println()
-
-	// Separator line
-	fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLen+2+len(pd.results)*colWidth), colorReset)
+	printSeparatorLine(pd)
 
 	// Print each step row (skip steps with no values on this page)
 	for _, step := range pd.stepNames {
@@ -423,15 +405,17 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 		if !hasValue {
 			continue
 		}
-		fmt.Printf("%-*s", maxStepLen+2, step)
+		fmt.Printf("%-*s", maxStepLenPlusPad(pd), step)
 		isOptional := pd.optionalSet[step]
-		for _, r := range pd.results {
+		for i := range len(pd.results) {
+			r := pd.results[i]
+			e := pd.emojis[i]
 			if !r.Pulled {
 				fmt.Printf("%s❔%s ", colorDim, colorReset)
 			} else if result, exists := r.Steps[step]; exists {
 				switch result {
 				case StepSuccess:
-					fmt.Printf("%s✅%s ", colorGreen, colorReset)
+					fmt.Printf("%s%s%s ", colorGreen, e, colorReset)
 				case StepFailure:
 					fmt.Printf("%s❌%s ", colorRed, colorReset)
 				default:
@@ -440,7 +424,7 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 			} else if isOptional {
 				fmt.Printf("%s..%s ", colorDim, colorReset)
 			} else if isStepExpectedForJob(step, pd.groupResults) {
-				fmt.Printf("%s❌%s ", colorRed, colorReset)
+				fmt.Printf("%s⭕️%s ", colorRed, colorReset)
 			} else {
 				fmt.Printf("%s──%s ", colorDim, colorReset)
 			}
@@ -448,7 +432,25 @@ func renderRawPage(pd pageData, cfg *Config, groupByPlatform bool) {
 		fmt.Println()
 	}
 
+	printSeparatorLine(pd)
 	fmt.Println()
+}
+
+// Find the longest step name for padding, plus padding
+func maxStepLenPlusPad(pd pageData) int {
+	maxStepLen := 0
+	for _, s := range pd.stepNames {
+		if len(s) > maxStepLen {
+			maxStepLen = len(s)
+		}
+	}
+	return maxStepLen + 2
+}
+
+// Separator line
+func printSeparatorLine(pd pageData) {
+	colWidth := 3
+	fmt.Printf("%s%s%s\n", colorDim, strings.Repeat("─", maxStepLenPlusPad(pd)+len(pd.results)*colWidth), colorReset)
 }
 
 // orderSteps returns step names ordered by config step_order.
