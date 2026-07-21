@@ -10,29 +10,29 @@ func TestClassifyRun(t *testing.T) {
 		job  string
 		want string
 	}{
-		{"aws job", "periodic-ci-openshift-eng-ocp-qe-perfscale-aws-4.22-e2e", "AWS"},
-		{"rosa job", "periodic-ci-openshift-eng-ocp-qe-perfscale-rosa-classic-4.17", "ROSA"},
-		{"rosa_hcp job", "periodic-ci-openshift-eng-ocp-qe-perfscale-rosa_hcp-4.17", "ROSA HCP"},
-		{"hypershift job", "periodic-ci-openshift-eng-ocp-qe-perfscale-hypershift-test", "ROSA HCP"},
-		{"vsphere job", "periodic-ci-openshift-eng-ocp-qe-perfscale-vsphere-4.17", "vSphere"},
-		{"netobserv job", "periodic-ci-openshift-eng-ocp-qe-perfscale-netobserv-perf-tests-netobserv", "NetObserv"},
-		{"metal-rhoso job", "periodic-ci-openshift-eng-ocp-qe-perfscale-metal-rhoso-test", "Metal RHOSO"},
-		{"baremetal-multi job", "periodic-ci-openshift-eng-ocp-qe-perfscale-baremetal-multi-3nodes", "Baremetal Multi"},
+		{"aws job", "periodic-ci-openshift-eng-ocp-perfscale-aws-4.22-e2e", "AWS"},
+		{"rosa job", "periodic-ci-openshift-eng-ocp-perfscale-rosa-classic-4.17", "ROSA"},
+		{"rosa_hcp job", "periodic-ci-openshift-eng-ocp-perfscale-rosa_hcp-4.17", "ROSA HCP"},
+		{"hypershift job", "periodic-ci-openshift-eng-ocp-perfscale-hypershift-test", "ROSA HCP"},
+		{"vsphere job", "periodic-ci-openshift-eng-ocp-perfscale-vsphere-4.17", "vSphere"},
+		{"netobserv job", "periodic-ci-openshift-eng-ocp-perfscale-netobserv-perf-tests-netobserv", "NetObserv"},
+		{"metal-rhoso job", "periodic-ci-openshift-eng-ocp-perfscale-metal-rhoso-test", "Metal RHOSO"},
+		{"baremetal-multi job", "periodic-ci-openshift-eng-ocp-perfscale-baremetal-multi-3nodes", "Baremetal Multi"},
 
 		// Job type groups
-		{"loaded-upgrade aws", "periodic-ci-openshift-eng-ocp-qe-perfscale-loaded-upgrade-aws-4.17", "!Loaded Upgrade / AWS"},
-		{"loaded-upgrade rosa", "periodic-ci-openshift-eng-ocp-qe-perfscale-loaded-upgrade-rosa-4.17", "!Loaded Upgrade / ROSA"},
-		{"loaded-upgrade rosa_hcp", "periodic-ci-openshift-eng-ocp-qe-perfscale-loaded-upgrade-rosa_hcp-4.17", "!Loaded Upgrade / ROSA HCP"},
+		{"loaded-upgrade aws", "periodic-ci-openshift-eng-ocp-perfscale-loaded-upgrade-aws-4.17", "!Loaded Upgrade / AWS"},
+		{"loaded-upgrade rosa", "periodic-ci-openshift-eng-ocp-perfscale-loaded-upgrade-rosa-4.17", "!Loaded Upgrade / ROSA"},
+		{"loaded-upgrade rosa_hcp", "periodic-ci-openshift-eng-ocp-perfscale-loaded-upgrade-rosa_hcp-4.17", "!Loaded Upgrade / ROSA HCP"},
 
 		// Metal sub-groups
-		{"metal daily-virt", "periodic-ci-openshift-eng-ocp-qe-perfscale-metal-daily-virt-4.17", "!Metal / daily-virt"},
-		{"metal weekly", "periodic-ci-openshift-eng-ocp-qe-perfscale-metal-weekly-4.17", "!Metal / weekly"},
-		{"metal weekly-telco-core-cpt", "periodic-ci-openshift-eng-ocp-qe-perfscale-metal-weekly-telco-core-cpt", "!Metal / weekly-telco-core-cpt"},
-		{"metal weekly-eip", "periodic-ci-openshift-eng-ocp-qe-perfscale-metal-weekly-eip-4.17", "!Metal / weekly-eip"},
-		{"metal udn-bgp", "periodic-ci-openshift-eng-ocp-qe-perfscale-metal-udn-bgp-4.17", "!Metal / udn-bgp"},
+		{"metal daily-virt", "periodic-ci-openshift-eng-ocp-perfscale-metal-daily-virt-4.17", "!Metal / daily-virt"},
+		{"metal weekly", "periodic-ci-openshift-eng-ocp-perfscale-metal-weekly-4.17", "!Metal / weekly"},
+		{"metal weekly-telco-core-cpt", "periodic-ci-openshift-eng-ocp-perfscale-metal-weekly-telco-core-cpt", "!Metal / weekly-telco-core-cpt"},
+		{"metal weekly-eip", "periodic-ci-openshift-eng-ocp-perfscale-metal-weekly-eip-4.17", "!Metal / weekly-eip"},
+		{"metal udn-bgp", "periodic-ci-openshift-eng-ocp-perfscale-metal-udn-bgp-4.17", "!Metal / udn-bgp"},
 
 		// Unknown
-		{"unknown job", "periodic-ci-openshift-eng-ocp-qe-perfscale-unknown-thing", "other"},
+		{"unknown job", "periodic-ci-openshift-eng-ocp-perfscale-unknown-thing", "other"},
 	}
 
 	for _, tt := range tests {
@@ -291,16 +291,16 @@ func TestCountUniqueJobs(t *testing.T) {
 }
 
 func TestShortJobName(t *testing.T) {
-	cfg := &Config{JobPattern: "periodic-ci-openshift-eng-ocp-qe-perfscale"}
+	cfg := &Config{JobPattern: "periodic-ci-openshift-eng-ocp-perfscale"}
 
 	tests := []struct {
 		name string
 		job  string
 		want string
 	}{
-		{"with prefix", "periodic-ci-openshift-eng-ocp-qe-perfscale-aws-4.22", "-j aws-4.22"},
+		{"with prefix", "periodic-ci-openshift-eng-ocp-perfscale-aws-4.22", "-j aws-4.22"},
 		{"without prefix", "some-other-job", "some-other-job"},
-		{"exact prefix no suffix", "periodic-ci-openshift-eng-ocp-qe-perfscale-", "-j "},
+		{"exact prefix no suffix", "periodic-ci-openshift-eng-ocp-perfscale-", "-j "},
 	}
 
 	for _, tt := range tests {
