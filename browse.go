@@ -299,13 +299,13 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 				m.scrollToCursor()
 			}
-		case "pgup":
+		case "pgup", "ctrl+u":
 			m.cursor -= m.visibleRows()
 			if m.cursor < 0 {
 				m.cursor = 0
 			}
 			m.scrollToCursor()
-		case "pgdown":
+		case "pgdown", "ctrl+d":
 			m.cursor += m.visibleRows()
 			if m.cursor >= len(m.flat) {
 				m.cursor = len(m.flat) - 1
