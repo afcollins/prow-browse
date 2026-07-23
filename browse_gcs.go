@@ -16,6 +16,7 @@ import (
 type dirEntry struct {
 	Name  string
 	IsDir bool
+	Size  int64
 }
 
 // listDir lists immediate children (dirs and files) under a GCS prefix.
@@ -48,7 +49,7 @@ func (g *gcsClient) listDir(ctx context.Context, prefix string) ([]dirEntry, err
 		} else if attrs.Name != prefix {
 			name := strings.TrimPrefix(attrs.Name, prefix)
 			if name != "" {
-				entries = append(entries, dirEntry{Name: name, IsDir: false})
+				entries = append(entries, dirEntry{Name: name, IsDir: false, Size: attrs.Size})
 			}
 		}
 	}

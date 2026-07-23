@@ -36,7 +36,25 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(browseColorPrimary).
 				Padding(0, 1)
+
+	browseSizeWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E2B93D"))
+	browseSizeDanger    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E74C3C"))
 )
+
+const largeSizeThreshold = 10 * 1024 * 1024 // 10 MB
+
+func humanSize(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(b)/float64(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(b)/float64(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(b)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
 
 type treeNode struct {
 	name     string
@@ -48,6 +66,8 @@ type treeNode struct {
 	loaded   bool
 	depth    int
 	result   StepResult
+	size     int64
+	hasSize  bool
 }
 
 type browseModel struct {
@@ -69,6 +89,10 @@ type browseModel struct {
 	downloaded map[string]bool
 	openKbx    bool
 	openFile   *treeNode
+	showSizes  bool
+	confirming bool
+	confirmMsg string
+	confirmCmd tea.Cmd
 }
 
 type listDirDoneMsg struct {
@@ -94,7 +118,7 @@ type openDoneMsg struct {
 
 const headerLines = 4 // title + help + blank line + border
 const footerLines = 4 // scroll indicator + blank + status + border
-const helpText = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  c clear  / search  d download  o open  x kbx  q quit"
+const helpText = "↑/↓ navigate  →/Enter expand  ← collapse  Space check  c clear  / search  d download  o open  x kbx  l sizes  q quit"
 
 func newBrowseModel(gcs *gcsClient, cfg *Config, result RunResult, outputDir string) browseModel {
 	var root []*treeNode
@@ -170,6 +194,8 @@ func newBrowseModelFromPath(gcs *gcsClient, cfg *Config, gcsPath, outputDir stri
 			gcsPath: gcsPath + "/" + e.Name,
 			isDir:   e.IsDir,
 			depth:   0,
+			size:    e.Size,
+			hasSize: !e.IsDir,
 		})
 	}
 
@@ -250,6 +276,9 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.confirming {
+			return m.updateConfirm(msg)
+		}
 		if m.searching {
 			return m.updateSearch(msg)
 		}
@@ -357,6 +386,23 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "no files checked"
 				return m, nil
 			}
+			allFiles := collectFiles(checked)
+			var largeCount int
+			var totalLarge int64
+			for _, f := range allFiles {
+				if f.hasSize && f.size > largeSizeThreshold {
+					largeCount++
+					totalLarge += f.size
+				}
+			}
+			if largeCount > 0 {
+				cmd := m.downloadItems(checked)
+				m.confirmMsg = fmt.Sprintf("%d files >10M (total %s) — download all? (y/n)", largeCount, humanSize(totalLarge))
+				m.confirmCmd = cmd
+				m.confirming = true
+				m.status = m.confirmMsg
+				return m, nil
+			}
 			m.status = fmt.Sprintf("downloading %d items...", len(checked))
 			return m, m.downloadItems(checked)
 		case "x":
@@ -381,9 +427,25 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "cannot open directory"
 				return m, nil
 			}
+			if node.hasSize && node.size > largeSizeThreshold {
+				m.openFile = node
+				cmd := m.downloadItems([]*treeNode{node})
+				m.confirmMsg = fmt.Sprintf("%s is %s — download? (y/n)", node.name, humanSize(node.size))
+				m.confirmCmd = cmd
+				m.confirming = true
+				m.status = m.confirmMsg
+				return m, nil
+			}
 			m.openFile = node
 			m.status = fmt.Sprintf("downloading %s...", node.name)
 			return m, m.downloadItems([]*treeNode{node})
+		case "l":
+			m.showSizes = !m.showSizes
+			if m.showSizes {
+				m.status = "file sizes shown"
+			} else {
+				m.status = "file sizes hidden"
+			}
 		case "c":
 			setCheckedRecursive(m.root, false)
 			m.status = "cleared all selections"
@@ -401,6 +463,8 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				gcsPath: msg.node.gcsPath + "/" + e.Name,
 				isDir:   e.IsDir,
 				depth:   msg.node.depth + 1,
+				size:    e.Size,
+				hasSize: !e.IsDir,
 			}
 			msg.node.children = append(msg.node.children, child)
 		}
@@ -472,6 +536,23 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *browseModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		m.confirming = false
+		cmd := m.confirmCmd
+		m.confirmCmd = nil
+		m.status = "downloading..."
+		return m, cmd
+	case "n", "N", "esc":
+		m.confirming = false
+		m.confirmCmd = nil
+		m.openFile = nil
+		m.status = "download cancelled"
+	}
+	return m, nil
+}
+
 func (m *browseModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -538,6 +619,20 @@ func (m browseModel) View() string {
 	checkOn := lipgloss.NewStyle().Foreground(browseColorSuccess).Render("✓ ")
 	checkOff := "  "
 
+	// Pre-compute max size string width for right-aligned column
+	var maxSizeWidth int
+	if m.showSizes {
+		for i := m.offset; i < end; i++ {
+			n := m.flat[i]
+			if !n.isDir && n.hasSize {
+				w := len(humanSize(n.size))
+				if w > maxSizeWidth {
+					maxSizeWidth = w
+				}
+			}
+		}
+	}
+
 	for i := m.offset; i < end; i++ {
 		node := m.flat[i]
 		indent := strings.Repeat("  ", node.depth)
@@ -576,7 +671,33 @@ func (m browseModel) View() string {
 			}
 		}
 
-		line := indent + icon + name
+		left := indent + icon + name
+		var sizeCol string
+		if m.showSizes && !node.isDir && node.hasSize {
+			raw := humanSize(node.size)
+			padded := fmt.Sprintf("%*s", maxSizeWidth, raw)
+			switch {
+			case node.size >= 1<<30:
+				sizeCol = browseSizeDanger.Render(padded)
+			case node.size > largeSizeThreshold:
+				sizeCol = browseSizeWarnStyle.Render(padded)
+			default:
+				sizeCol = browseStatusStyle.Render(padded)
+			}
+		}
+
+		var line string
+		if sizeCol != "" {
+			usable := m.width - 50 // border + padding
+			leftLen := len(indent) + len(icon) + len(name)
+			gap := usable - leftLen - maxSizeWidth
+			if gap < 2 {
+				gap = 2
+			}
+			line = left + strings.Repeat(" ", gap) + sizeCol
+		} else {
+			line = left
+		}
 		if i == m.cursor {
 			line = browseSelectedStyle.Render(line)
 		}
@@ -603,7 +724,9 @@ func (m browseModel) View() string {
 
 	// Status / search bar
 	b.WriteString("\n\n")
-	if m.searching {
+	if m.confirming {
+		b.WriteString(browseSizeWarnStyle.Render(m.confirmMsg))
+	} else if m.searching {
 		b.WriteString(lipgloss.NewStyle().Foreground(browseColorPrimary).Render(
 			fmt.Sprintf("/%s█", m.searchBuf)))
 	} else {
