@@ -71,28 +71,29 @@ type treeNode struct {
 }
 
 type browseModel struct {
-	root       []*treeNode
-	flat       []*treeNode
-	cursor     int
-	offset     int // viewport scroll offset
-	height     int // terminal height
-	width      int
-	gcs        *gcsClient
-	cfg        *Config
-	title      string // header display text
-	gcsPrefix  string // root GCS path being browsed
-	outputDir  string
-	status     string
-	quitting   bool
-	searching  bool
-	searchBuf  string
-	downloaded map[string]bool
-	openKbx    bool
-	openFile   *treeNode
-	showSizes  bool
-	confirming bool
-	confirmMsg string
-	confirmCmd tea.Cmd
+	root        []*treeNode
+	flat        []*treeNode
+	cursor      int
+	offset      int // viewport scroll offset
+	height      int // terminal height
+	width       int
+	gcs         *gcsClient
+	cfg         *Config
+	title       string // header display text
+	gcsPrefix   string // root GCS path being browsed
+	outputDir   string
+	status      string
+	quitting    bool
+	searching   bool
+	searchBuf   string
+	downloaded  map[string]bool
+	openKbx     bool
+	openFile    *treeNode
+	showSizes   bool
+	confirming  bool
+	confirmMsg  string
+	confirmCmd  tea.Cmd
+	confirmQuit bool
 }
 
 type listDirDoneMsg struct {
@@ -279,6 +280,17 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.confirming {
 			return m.updateConfirm(msg)
 		}
+		if m.confirmQuit {
+			switch msg.String() {
+			case "q", "y", "Z":
+				m.quitting = true
+				return m, tea.Quit
+			default:
+				m.confirmQuit = false
+				m.status = helpText
+				return m, nil
+			}
+		}
 		if m.searching {
 			return m.updateSearch(msg)
 		}
@@ -286,9 +298,10 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+z":
 			return m, tea.Suspend
-		case "q", "esc":
-			m.quitting = true
-			return m, tea.Quit
+		case "q", "esc", "Z":
+			m.confirmQuit = true
+			m.status = "quit? (q/y to confirm, any other key to cancel)"
+			return m, nil
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
