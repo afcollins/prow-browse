@@ -16,7 +16,13 @@ var (
 )
 
 func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
-	// Print platform/page header
+	fmt.Print(renderTablePageString(pd, cfg, groupByPlatform, -1, -1))
+}
+
+func renderTablePageString(pd pageData, cfg *Config, groupByPlatform bool, highlightRow, highlightCol int) string {
+	var b strings.Builder
+
+	// Platform/page header
 	showHeader := groupByPlatform || pd.totalPages > 1
 	if showHeader {
 		label := displayGroupName(pd.platform)
@@ -31,10 +37,10 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 				label = page
 			}
 		}
-		fmt.Printf("\n%s\n\n", styleHeader.Render("── "+label+" ──"))
+		fmt.Fprintf(&b, "\n%s\n\n", styleHeader.Render("── "+label+" ──"))
 	}
 
-	// Print legend
+	// Legend
 	maxRunIDLen := 0
 	maxShortNameLen := 0
 	for _, r := range pd.results {
@@ -47,19 +53,21 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 		}
 	}
 
-	fmt.Println(styleHeader.Render("Legend:"))
+	b.WriteString(styleHeader.Render("Legend:"))
+	b.WriteString("\n")
 	for i, r := range pd.results {
 		shortName := shortJobName(r.Job, cfg)
 		line := fmt.Sprintf("  %s %-*s  %-*s", pd.emojis[i], maxRunIDLen, r.RunID, maxShortNameLen, shortName)
 		if r.VariantID != "" {
 			line += fmt.Sprintf("  %s", styleDim.Render("("+r.VariantID+")"))
 		}
-		fmt.Println(line)
+		b.WriteString(line)
+		b.WriteString("\n")
 		if pd.showURLs {
-			fmt.Printf("      %s\n", styleDim.Render(runURL(cfg, r)))
+			fmt.Fprintf(&b, "      %s\n", styleDim.Render(runURL(cfg, r)))
 		}
 	}
-	fmt.Println()
+	b.WriteString("\n")
 
 	// Filter steps with no values on this page
 	var visibleSteps []string
@@ -129,11 +137,9 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 		cellTypes[ri] = types
 	}
 
-	// Convert rows to [][]string for table.Rows
 	rowSlices := make([][]string, len(rows))
 	copy(rowSlices, rows)
 
-	// Build border style
 	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 
 	t := table.New().
@@ -148,21 +154,39 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 			base := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
 
 			if row == table.HeaderRow {
-				return base.Bold(true).Foreground(lipgloss.Color("6")).Align(lipgloss.Center)
-			}
-
-			if col == 0 {
+				base = base.Bold(true).Foreground(lipgloss.Color("6")).Align(lipgloss.Center)
+				if highlightCol >= 0 && col == highlightCol+1 {
+					base = base.Underline(true)
+				}
 				return base
 			}
 
-			// Data cells — center-aligned
+			if col == 0 {
+				if highlightRow >= 0 && row == highlightRow {
+					return base.Bold(true).Foreground(lipgloss.Color("6"))
+				}
+				return base
+			}
+
 			base = base.Align(lipgloss.Center)
+
+			isHighlightRow := highlightRow >= 0 && row == highlightRow
+			isHighlightCol := highlightCol >= 0 && col == highlightCol+1
+
+			if isHighlightRow && isHighlightCol {
+				base = base.Bold(true).Underline(true)
+			} else if isHighlightRow {
+				base = base.Bold(true)
+			} else if isHighlightCol {
+				base = base.Underline(true)
+			}
+
 			if row >= 0 && row < len(cellTypes) && col < len(cellTypes[row]) {
 				switch cellTypes[row][col] {
 				case cellGreen:
 					return base.Foreground(lipgloss.Color("2"))
 				case cellRed:
-					return base.Foreground(lipgloss.Color("1")).Bold(true)
+					return base.Foreground(lipgloss.Color("1"))
 				case cellDim:
 					return base.Faint(true)
 				}
@@ -170,16 +194,17 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 			return base
 		})
 
-	fmt.Println(t)
-	fmt.Println()
+	b.WriteString(t.String())
+	b.WriteString("\n\n")
 
-	// Print summary line
+	// Summary line
 	total := len(pd.results)
 	steps := len(visibleSteps)
-	fmt.Println(styleDim.Render(fmt.Sprintf("  %d columns x %d steps", total, steps)))
+	b.WriteString(styleDim.Render(fmt.Sprintf("  %d columns x %d steps", total, steps)))
+	b.WriteString("\n")
 
-	// Print key
-	fmt.Println(styleDim.Render(strings.Join([]string{
+	// Key
+	b.WriteString(styleDim.Render(strings.Join([]string{
 		"  ",
 		styleGreen.Render("OK") + "=success  ",
 		styleRed.Bold(true).Render("FAIL") + "=failure  ",
@@ -188,6 +213,7 @@ func renderTablePage(pd pageData, cfg *Config, groupByPlatform bool) {
 		styleDim.Render("--") + "=n/a  ",
 		styleDim.Render("PULL") + "=not pulled",
 	}, "")))
+	b.WriteString("\n\n")
 
-	fmt.Println()
+	return b.String()
 }
