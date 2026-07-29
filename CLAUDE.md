@@ -9,6 +9,8 @@ CLI tool (Go) that queries a GCS bucket containing OpenShift CI (Prow) periodic 
 ```bash
 make build && make test && make lint
 ./pb -j "aws-4.22" -n 5        # display from local DB
+./pb -i -j "aws" -n 10         # interactive grid TUI, Enter to browse
+./pb -i -g -j "120nodes"       # interactive grid with platform grouping
 ./pb fetch -j "120nodes" -n 10  # discover run IDs from GCS
 ./pb pull -n 3 -j "aws"         # pull step data for latest unpulled
 ./pb pull 2038435361289408512   # force re-pull specific run
@@ -22,11 +24,12 @@ Single-binary Go CLI using cobra subcommands, all source in the root package:
 
 - `main.go` - Entry point, cobra commands: root (local display), `fetch` (discovery), `pull` (artifact traversal), `browse` (interactive TUI)
 - `gcs.go` - GCS operations: recursive listing + concurrent `finished.json` reads, logrus-based call logging to `~/.local/share/prow-browse/gcs.log`
-- `browse.go` - Bubbletea TUI for artifact browsing: tree navigation, search, viewport scrolling, batch download with dedup, file-type open (vim/jq), kbx integration via `tea.ExecProcess`
+- `grid.go` - Interactive grid TUI (`-i`): `gridModel` (2D cursor, horizontal sliding window, vertical step scroll), `appModel` (routes between grid and browse), `runInteractiveGrid`
+- `browse.go` - Bubbletea TUI for artifact browsing: tree navigation, search, viewport scrolling, batch download with dedup, file-type open (vim/jq), kbx integration via `tea.ExecProcess`. Supports `embeddedMode` for seamless grid↔browse transitions
 - `browse_gcs.go` - GCS helpers for browse: `listDir` (delimiter-based listing), `downloadObject` (stream to file)
 - `db.go` - SQLite storage (modernc.org/sqlite). Steps table stores result (SUCCESS/FAILURE/UNKNOWN). Schema auto-migrates.
-- `display.go` - Grid orchestration, platform/job-type classification, ANSI raw renderer
-- `display_table.go` - Lipgloss v2 table renderer (`-t` flag)
+- `display.go` - Grid orchestration, platform/job-type classification, ANSI raw renderer. `buildGroupedResults` extracts grouping logic for reuse by grid TUI
+- `display_table.go` - Lipgloss v2 table renderer (`-t` flag). `renderTablePageString` returns string with optional crosshair highlighting for interactive mode
 - `config.go` - JSON config loading, `DownloadDir` field for browse downloads
 - `Makefile` - Build with `-s -w` ldflags, `make test`, `make lint`, `make fmt`
 
@@ -44,8 +47,11 @@ Single-binary Go CLI using cobra subcommands, all source in the root package:
 - Cell states: ✅=success, ❌=failure, 👻=unknown, ❔=not pulled, `..`=optional, `──`=n/a
 - No-recurse/gather steps pushed to bottom of page
 - Empty step rows skipped; pagination via `columns_per_page` config
+- Interactive grid (`-i`): `appModel` wraps `gridModel` + `browseModel`, swaps via `switchToBrowseMsg`/`switchToGridMsg`. Single `tea.Program`, no subprocess
+- Grid uses sliding window over runs (horizontal) and step offset (vertical). Starts at newest run. Crosshair highlights via underline (column) and bold (row)
 - `browse` builds initial tree from DB (zero GCS calls if run is pulled); lazy GCS expansion on dir open
 - `browse --path` accepts bucket-relative paths, gs:// URLs, or gcsweb URLs with auto-normalization
+- `browse` `embeddedMode`: when launched from grid, quit returns to grid instead of exiting
 - Downloads mirror full GCS bucket path under `download_dir`; already-downloaded files skipped
 - `browse` opens files via `tea.ExecProcess` subprocess handoff: `x` launches kbx on checked files, `o` opens cursor file with type-appropriate viewer (json→jq|vim, log.gz→zcat|vim, else→vim)
 - `c` clears all checked selections in browse
