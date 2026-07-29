@@ -155,5 +155,24 @@ Edit `config.json`:
 ## Prerequisites
 
 - Go 1.21+
-- GCP application default credentials (`gcloud auth application-default login`)
 - Read access to the target GCS bucket
+
+### GCP authentication setup
+
+The tool uses [Application Default Credentials](https://cloud.google.com/docs/authentication/external/set-up-adc) (ADC) to access GCS. This is separate from `gcloud auth login` — you need both:
+
+```bash
+# 1. Log in to gcloud (if not already done)
+gcloud auth login
+
+# 2. Set up Application Default Credentials (required for the Go GCS SDK)
+gcloud auth application-default login
+```
+
+To verify ADC is configured:
+
+```bash
+ls ~/.config/gcloud/application_default_credentials.json
+```
+
+If the file exists, you're set. If not, run step 2 above.
