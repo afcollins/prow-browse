@@ -559,7 +559,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *browseModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m browseModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		m.confirming = false
@@ -576,7 +576,7 @@ func (m *browseModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *browseModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m browseModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		m.searching = false
