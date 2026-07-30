@@ -11,6 +11,7 @@ A CLI tool that provides a single-pane view of OpenShift CI (Prow) periodic job 
 - Two-level grouping for loaded-upgrade and metal jobs (by platform/sub-config)
 - Steps ordered by CI execution sequence; gather steps pushed to bottom
 - GCS web URLs in legend (`-u`) for quick access to run artifacts
+- Interactive grid mode (`-i`): navigate the status grid with 2D cursor, press Enter to browse a run's artifacts
 - Interactive artifact browser (`browse`) with bubbletea TUI — lazy GCS expansion, search, batch download
 - Browse arbitrary GCS paths (`browse --path`) — supports PR logs, gcsweb URLs, gs:// URLs
 - Concurrent GCS API calls with progress logging and call counter (`-v`)
@@ -38,6 +39,10 @@ make test
 ./pb -g -t                      # group by platform, table rendering
 ./pb -j "aws" -n 3 -u           # show gcsweb URLs in legend
 
+# Interactive grid mode
+./pb -i -j "aws" -n 10          # navigate grid, Enter to browse a run
+./pb -i -g -j "120nodes"        # with platform grouping, Tab to switch
+
 # Database introspection
 ./pb --stats
 ./pb --query "SELECT job, count(*) FROM runs GROUP BY job"
@@ -53,6 +58,47 @@ make test
 # GCS call log (written automatically on any GCS operation)
 cat ~/.local/share/prow-browse/gcs.log
 ```
+
+### Interactive grid (`-i`)
+
+Launches a full-screen TUI with the lipgloss table. Navigate with a 2D crosshair cursor, then press Enter to dive into the artifact browser for the selected run.
+
+```
+╭──────────────────────────────────────────────────────────────╮
+│ AWS — 5 run(s)                                               │
+│                                                              │
+│ Legend:                                                      │
+│   🍎 1893640128  -j aws-4.22                                 │
+│   🟠 1893855744  -j aws-4.22                                 │
+│   🟡 1894071360  -j aws-4.22                                 │
+│                                                              │
+│ ╭───────────────────┬──────┬──────┬──────╮                   │
+│ │ Step              │  🍎  │  🟠  │  🟡  │                   │
+│ ├───────────────────┼──────┼──────┼──────┤                   │
+│ │ ipi-install       │  OK  │  OK  │ FAIL │                   │
+│ │ e2e-test          │  OK  │ FAIL │  --  │                   │
+│ │ gather-must       │  OK  │  OK  │  OK  │  ← cursor row     │
+│ ╰───────────────────┴──────┴──────┴──────╯                   │
+│                               ▲                              │
+│                         cursor col                           │
+│                                                              │
+│   [run 3/5  step 3/12]                                       │
+│   ↑↓←→ navigate  Enter browse  Tab group  q quit             │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+| Key | Action |
+|-----|--------|
+| ↑/↓, j/k | Move cursor between steps (vertical scroll at edges) |
+| ←/→, h/l | Move cursor between runs (sliding window at edges) |
+| Enter | Browse selected run's artifacts |
+| Tab / Shift+Tab | Switch platform group (with `-g`) |
+| PgUp/PgDn, Ctrl+U/D | Scroll steps by page |
+| g/G | Jump to first/last step |
+| 0/$ | Jump to oldest/newest run |
+| q/Esc | Quit |
+
+The grid starts at the newest run. Scroll left to see older runs.
 
 ### Browse keys
 

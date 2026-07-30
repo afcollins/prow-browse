@@ -71,29 +71,30 @@ type treeNode struct {
 }
 
 type browseModel struct {
-	root        []*treeNode
-	flat        []*treeNode
-	cursor      int
-	offset      int // viewport scroll offset
-	height      int // terminal height
-	width       int
-	gcs         *gcsClient
-	cfg         *Config
-	title       string // header display text
-	gcsPrefix   string // root GCS path being browsed
-	outputDir   string
-	status      string
-	quitting    bool
-	searching   bool
-	searchBuf   string
-	downloaded  map[string]bool
-	openKbx     bool
-	openFile    *treeNode
-	showSizes   bool
-	confirming  bool
-	confirmMsg  string
-	confirmCmd  tea.Cmd
-	confirmQuit bool
+	root         []*treeNode
+	flat         []*treeNode
+	cursor       int
+	offset       int // viewport scroll offset
+	height       int // terminal height
+	width        int
+	gcs          *gcsClient
+	cfg          *Config
+	title        string // header display text
+	gcsPrefix    string // root GCS path being browsed
+	outputDir    string
+	status       string
+	quitting     bool
+	searching    bool
+	searchBuf    string
+	downloaded   map[string]bool
+	openKbx      bool
+	openFile     *treeNode
+	showSizes    bool
+	confirming   bool
+	confirmMsg   string
+	confirmCmd   tea.Cmd
+	confirmQuit  bool
+	embeddedMode bool
 }
 
 type listDirDoneMsg struct {
@@ -116,6 +117,8 @@ type kbxDoneMsg struct {
 type openDoneMsg struct {
 	err error
 }
+
+type switchToGridMsg struct{}
 
 const headerLines = 4 // title + help + blank line + border
 const footerLines = 4 // scroll indicator + blank + status + border
@@ -283,6 +286,9 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.confirmQuit {
 			switch msg.String() {
 			case "q", "y", "Z":
+				if m.embeddedMode {
+					return m, func() tea.Msg { return switchToGridMsg{} }
+				}
 				m.quitting = true
 				return m, tea.Quit
 			default:
@@ -300,7 +306,11 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Suspend
 		case "q", "esc", "Z":
 			m.confirmQuit = true
-			m.status = "quit? (q/y to confirm, any other key to cancel)"
+			if m.embeddedMode {
+				m.status = "back to grid? (q/y to confirm, any other key to cancel)"
+			} else {
+				m.status = "quit? (q/y to confirm, any other key to cancel)"
+			}
 			return m, nil
 		case "up", "k":
 			if m.cursor > 0 {
@@ -549,7 +559,7 @@ func (m browseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *browseModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m browseModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		m.confirming = false
@@ -566,7 +576,7 @@ func (m *browseModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *browseModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m browseModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		m.searching = false

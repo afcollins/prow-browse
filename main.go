@@ -74,6 +74,7 @@ func main() {
 			group, _ := cmd.Flags().GetBool("group")
 			useTable, _ := cmd.Flags().GetBool("table")
 			showURLs, _ := cmd.Flags().GetBool("urls")
+			interactive, _ := cmd.Flags().GetBool("interactive")
 
 			if len(args) > 0 {
 				runIDs, err := resolveRunIDs(db, args)
@@ -84,8 +85,19 @@ func main() {
 				if err != nil {
 					return fmt.Errorf("failed to query runs: %w", err)
 				}
+				if interactive {
+					return runInteractiveGrid(results, cfg, db, group, showURLs)
+				}
 				displayGrid(results, cfg, group, useTable, showURLs)
 				return nil
+			}
+
+			if interactive {
+				results := loadLocalResults(db, cfg, jobFilter, numRuns)
+				if len(results) == 0 {
+					return nil
+				}
+				return runInteractiveGrid(results, cfg, db, group, showURLs)
 			}
 
 			runLocal(db, cfg, jobFilter, numRuns, group, useTable, showURLs)
@@ -102,6 +114,7 @@ func main() {
 	rootCmd.Flags().BoolP("group", "g", false, "Group columns by platform (AWS, ROSA, etc.)")
 	rootCmd.Flags().BoolP("table", "t", false, "Use lipgloss table rendering")
 	rootCmd.Flags().BoolP("urls", "u", false, "Show GCS web URLs for each run")
+	rootCmd.Flags().BoolP("interactive", "i", false, "Launch interactive grid TUI")
 
 	fetchCmd := &cobra.Command{
 		Use:   "fetch",
@@ -238,17 +251,16 @@ func resolveRunIDs(db *DB, suffixes []string) ([]string, error) {
 	return runIDs, nil
 }
 
-func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, useTable bool, showURLs bool) {
+func loadLocalResults(db *DB, cfg *Config, jobFilter string, numRuns int) []RunResult {
 	results, err := db.QueryResults(jobFilter)
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to query database")
 	}
 	if len(results) == 0 {
 		logrus.Info("no matching runs in local database; run 'prow-browse fetch' to populate")
-		return
+		return nil
 	}
 
-	// Apply global limit: most recent N runs across all jobs
 	if numRuns > 0 {
 		sort.Slice(results, func(i, j int) bool {
 			return results[i].RunID > results[j].RunID
@@ -259,6 +271,14 @@ func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, us
 	}
 
 	logrus.WithField("count", len(results)).Info("loaded runs from local database")
+	return results
+}
+
+func runLocal(db *DB, cfg *Config, jobFilter string, numRuns int, group bool, useTable bool, showURLs bool) {
+	results := loadLocalResults(db, cfg, jobFilter, numRuns)
+	if len(results) == 0 {
+		return
+	}
 	displayGrid(results, cfg, group, useTable, showURLs)
 }
 

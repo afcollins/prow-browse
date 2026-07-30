@@ -195,6 +195,16 @@ func displayGroupName(groupName string) string {
 	return strings.TrimPrefix(groupName, "!")
 }
 
+// groupData holds all runs and metadata for a single platform group before pagination.
+type groupData struct {
+	platform    string
+	results     []RunResult
+	emojis      []string
+	stepNames   []string
+	optionalSet map[string]bool
+	showURLs    bool
+}
+
 // pageData holds everything needed to render one page of the grid.
 type pageData struct {
 	platform     string
@@ -214,17 +224,15 @@ func runURL(cfg *Config, r RunResult) string {
 	return gcsWebBaseURL + cfg.Bucket + "/" + cfg.Prefix + "/" + r.Job + "/" + r.RunID + "/"
 }
 
-func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTable bool, showURLs bool) {
+func buildGroupedResults(results []RunResult, cfg *Config, groupByPlatform bool, showURLs bool) []groupData {
 	if len(results) == 0 {
-		return
+		return nil
 	}
 
-	// Sort results by run ID (chronological order)
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].RunID < results[j].RunID
 	})
 
-	// Assign a random emoji to each column (shuffled, no repeats until palette exhausted)
 	palette := getEmojiPalette(cfg.EmojiPalette)
 	shuffled := make([]string, len(palette))
 	copy(shuffled, palette)
@@ -234,7 +242,6 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 		colEmojis[i] = shuffled[i%len(shuffled)]
 	}
 
-	// Build set of optional/gather steps (shown as ".." when absent)
 	optionalSet := make(map[string]bool)
 	for _, s := range cfg.NoRecurseSteps {
 		optionalSet[s] = true
@@ -243,7 +250,6 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 		optionalSet[s] = true
 	}
 
-	// Gather steps are a subset of optional — used to push them to bottom of page
 	gatherSet := make(map[string]bool)
 	for _, s := range cfg.NoRecurseSteps {
 		gatherSet[s] = true
@@ -254,17 +260,11 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 		hideSet[s] = true
 	}
 
-	// Print header
-	fmt.Println()
-	fmt.Printf("%s%s%d run(s) across %d job(s)%s\n\n",
-		colorBold, colorCyan, len(results), countUniqueJobs(results), colorReset)
-
-	// Group runs by platform (or treat all as one group if --group not set)
 	type indexedResult struct {
 		result RunResult
 		emoji  string
 	}
-	groups := make(map[string][]indexedResult)
+	groupMap := make(map[string][]indexedResult)
 	var groupOrder []string
 	groupSeen := make(map[string]bool)
 	for i, r := range results {
@@ -276,14 +276,13 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 			groupSeen[platform] = true
 			groupOrder = append(groupOrder, platform)
 		}
-		groups[platform] = append(groups[platform], indexedResult{r, colEmojis[i]})
+		groupMap[platform] = append(groupMap[platform], indexedResult{r, colEmojis[i]})
 	}
 
-	// Display each platform group
+	var groups []groupData
 	for _, platform := range groupOrder {
-		group := groups[platform]
+		group := groupMap[platform]
 
-		// Collect steps for this group's runs
 		groupSteps := make(map[string]StepResult)
 		groupResults := make([]RunResult, len(group))
 		groupEmojis := make([]string, len(group))
@@ -291,12 +290,10 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 			groupResults[i] = ir.result
 			groupEmojis[i] = ir.emoji
 			for step := range ir.result.Steps {
-				groupSteps[step] = StepSuccess // value doesn't matter, just presence
+				groupSteps[step] = StepSuccess
 			}
 		}
 
-		// Filter steps: only show steps relevant to this platform when grouping
-		// Gather steps are pushed to the bottom of each page.
 		allStepNames := orderSteps(groupSteps, cfg.StepOrder)
 		var stepNames []string
 		var gatherSteps []string
@@ -314,25 +311,51 @@ func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTabl
 		}
 		stepNames = append(stepNames, gatherSteps...)
 
-		// Paginate within this platform group
+		groups = append(groups, groupData{
+			platform:    platform,
+			results:     groupResults,
+			emojis:      groupEmojis,
+			stepNames:   stepNames,
+			optionalSet: optionalSet,
+			showURLs:    showURLs,
+		})
+	}
+	return groups
+}
+
+func displayGrid(results []RunResult, cfg *Config, groupByPlatform bool, useTable bool, showURLs bool) {
+	groups := buildGroupedResults(results, cfg, groupByPlatform, showURLs)
+	if len(groups) == 0 {
+		return
+	}
+
+	total := 0
+	for _, g := range groups {
+		total += len(g.results)
+	}
+	fmt.Println()
+	fmt.Printf("%s%s%d run(s) across %d job(s)%s\n\n",
+		colorBold, colorCyan, total, countUniqueJobs(results), colorReset)
+
+	for _, g := range groups {
 		pageSize := cfg.ColumnsPerPage
-		totalPages := (len(group) + pageSize - 1) / pageSize
-		for pageStart := 0; pageStart < len(group); pageStart += pageSize {
+		totalPages := (len(g.results) + pageSize - 1) / pageSize
+		for pageStart := 0; pageStart < len(g.results); pageStart += pageSize {
 			pageEnd := pageStart + pageSize
-			if pageEnd > len(group) {
-				pageEnd = len(group)
+			if pageEnd > len(g.results) {
+				pageEnd = len(g.results)
 			}
 
 			pd := pageData{
-				platform:     platform,
+				platform:     g.platform,
 				pageNum:      pageStart/pageSize + 1,
 				totalPages:   totalPages,
-				results:      groupResults[pageStart:pageEnd],
-				emojis:       groupEmojis[pageStart:pageEnd],
-				stepNames:    stepNames,
-				groupResults: groupResults,
-				optionalSet:  optionalSet,
-				showURLs:     showURLs,
+				results:      g.results[pageStart:pageEnd],
+				emojis:       g.emojis[pageStart:pageEnd],
+				stepNames:    g.stepNames,
+				groupResults: g.results,
+				optionalSet:  g.optionalSet,
+				showURLs:     g.showURLs,
 			}
 
 			if useTable {
