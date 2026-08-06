@@ -54,10 +54,13 @@ func TestLoadConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("missing file", func(t *testing.T) {
-		_, err := loadConfig("/nonexistent/config.json")
-		if err == nil {
-			t.Error("expected error for missing file")
+	t.Run("missing file falls back to embedded defaults", func(t *testing.T) {
+		cfg, err := loadConfig("/nonexistent/config.json")
+		if err != nil {
+			t.Fatalf("expected embedded fallback, got error: %v", err)
+		}
+		if cfg.Bucket == "" {
+			t.Error("expected non-empty bucket from embedded config")
 		}
 	})
 

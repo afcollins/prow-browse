@@ -1,10 +1,14 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"os"
 	"path/filepath"
 )
+
+//go:embed config.json
+var defaultConfigJSON []byte
 
 const appName = "prow-browse"
 
@@ -55,7 +59,11 @@ func defaultDBPath() string {
 func loadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			data = defaultConfigJSON
+		} else {
+			return nil, err
+		}
 	}
 
 	var cfg Config
