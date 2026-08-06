@@ -686,6 +686,15 @@ func normalizeGCSPath(raw, defaultBucket string) (bucket, path string) {
 	}
 
 	path = strings.TrimSuffix(raw, "/")
+
+	// Prow URLs use legacy bucket names that differ from the actual GCS bucket
+	bucketAliases := map[string]string{
+		"origin-ci-test": "test-platform-results",
+	}
+	if actual, ok := bucketAliases[bucket]; ok {
+		bucket = actual
+	}
+
 	return bucket, path
 }
 

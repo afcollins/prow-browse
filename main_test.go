@@ -71,6 +71,12 @@ func TestNormalizeGCSPath(t *testing.T) {
 			wantBucket: "test-platform-results",
 			wantPath:   "logs/job/run",
 		},
+		{
+			name:       "prow URL with origin-ci-test bucket alias",
+			raw:        "https://prow.ci.openshift.org/view/gs/origin-ci-test/logs/openshift-etcd-396-aws-4.22-nightly-x86-control-plane-fips-24nodes/2084985628214169600",
+			wantBucket: "test-platform-results",
+			wantPath:   "logs/openshift-etcd-396-aws-4.22-nightly-x86-control-plane-fips-24nodes/2084985628214169600",
+		},
 	}
 
 	for _, tt := range tests {
