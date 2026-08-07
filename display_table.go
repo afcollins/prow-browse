@@ -58,7 +58,13 @@ func renderTablePageString(pd pageData, cfg *Config, groupByPlatform bool, highl
 	for i, r := range pd.results {
 		shortName := shortJobName(r.Job, cfg)
 		line := fmt.Sprintf("  %s %-*s  %-*s", pd.emojis[i], maxRunIDLen, r.RunID, maxShortNameLen, shortName)
-		if r.VariantID != "" {
+		if highlightCol >= 0 && i == highlightCol {
+			underline := lipgloss.NewStyle().Underline(true)
+			line = underline.Render(line)
+			if r.VariantID != "" {
+				line += fmt.Sprintf("  %s", underline.Faint(true).Render("("+r.VariantID+")"))
+			}
+		} else if r.VariantID != "" {
 			line += fmt.Sprintf("  %s", styleDim.Render("("+r.VariantID+")"))
 		}
 		b.WriteString(line)
